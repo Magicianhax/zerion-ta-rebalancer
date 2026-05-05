@@ -5,7 +5,7 @@
 
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
 import { config } from "../config.ts";
 import { api } from "./routes.ts";
@@ -24,18 +24,26 @@ const MIME: Record<string, string> = {
 };
 
 function serveStatic(path: string): Response | null {
-  // Prevent directory traversal
-  const safePath = path.replace(/^\/+/, "").replace(/\.\.+/g, "");
-  const candidates = [join(WEB_DIST, safePath)];
-  if (!extname(safePath)) candidates.push(join(WEB_DIST, "index.html"));
+  // Strip leading slashes; refuse path traversal.
+  const safePath = path.replace(/^\/+/, "");
+  if (safePath.includes("..")) return null;
+
+  // Try the requested file only if it has an extension; otherwise fall through
+  // to the SPA fallback (index.html). Directories are never served directly.
+  const candidates: string[] = [];
+  if (safePath && extname(safePath)) {
+    candidates.push(join(WEB_DIST, safePath));
+  }
+  candidates.push(join(WEB_DIST, "index.html"));
 
   for (const c of candidates) {
-    if (existsSync(c) && c.startsWith(WEB_DIST)) {
-      const body = readFileSync(c);
-      return new Response(body, {
-        headers: { "Content-Type": MIME[extname(c)] ?? "application/octet-stream" },
-      });
-    }
+    if (!c.startsWith(WEB_DIST)) continue;
+    if (!existsSync(c)) continue;
+    if (!statSync(c).isFile()) continue;
+    const body = readFileSync(c);
+    return new Response(body, {
+      headers: { "Content-Type": MIME[extname(c)] ?? "application/octet-stream" },
+    });
   }
   return null;
 }
