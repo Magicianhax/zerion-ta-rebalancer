@@ -1,0 +1,190 @@
+/**
+ * Subprocess wrapper around the forked Zerion CLI.
+ *
+ * The CLI emits JSON to stdout and structured errors to stderr — we shell out
+ * with --json --quiet, capture stdout, parse, and surface any error.code field.
+ *
+ * Uses spawn (not exec) to avoid shell injection. All arguments pass as a fixed
+ * argv array, never interpolated into a shell string.
+ */
+
+import { spawn } from "node:child_process";
+import { config } from "../config.ts";
+
+export interface ZerionError extends Error {
+  code: string;
+  details?: unknown;
+}
+
+export interface RunOptions {
+  /** Pass extra env vars (merged with current process env) */
+  env?: Record<string, string>;
+  /** Stdin payload (e.g., for sign-typed-data piping) */
+  stdin?: string;
+  /** Override timeout in ms (default 60s) */
+  timeoutMs?: number;
+}
+
+const DEFAULT_TIMEOUT_MS = 60_000;
+
+/**
+ * Spawn the Zerion CLI with the given argv. Resolves with parsed JSON stdout.
+ * Throws a ZerionError carrying the upstream error.code if the CLI fails.
+ */
+export function runZerion(args: string[], options: RunOptions = {}): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const env = {
+      ...process.env,
+      ZERION_API_KEY: config.zerionApiKey,
+      ...options.env,
+    };
+
+    const child = spawn(process.execPath, [config.zerionCliPath, ...args, "--json"], {
+      env,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderr = "";
+    const timeout = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(makeError("timeout", `Zerion CLI timed out after ${options.timeoutMs ?? DEFAULT_TIMEOUT_MS}ms`));
+    }, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+
+    child.stdout.on("data", (chunk) => (stdout += chunk.toString("utf8")));
+    child.stderr.on("data", (chunk) => (stderr += chunk.toString("utf8")));
+
+    child.on("error", (err) => {
+      clearTimeout(timeout);
+      reject(makeError("spawn_failed", `Failed to spawn Zerion CLI: ${err.message}`));
+    });
+
+    child.on("close", (exitCode) => {
+      clearTimeout(timeout);
+      if (exitCode === 0) {
+        try {
+          resolve(stdout.trim() ? JSON.parse(stdout) : null);
+        } catch (e: any) {
+          reject(makeError("parse_error", `Could not parse CLI stdout: ${e.message}`, { stdout, stderr }));
+        }
+        return;
+      }
+
+      // Try to extract structured error from stderr
+      try {
+        const parsed = JSON.parse(stderr.trim());
+        if (parsed.error) {
+          reject(makeError(parsed.error.code ?? "cli_error", parsed.error.message ?? stderr, parsed.error));
+          return;
+        }
+      } catch {
+        // fall through to plain-text error
+      }
+      reject(makeError("cli_error", stderr.trim() || `Zerion CLI exited with code ${exitCode}`));
+    });
+
+    if (options.stdin) {
+      child.stdin.write(options.stdin);
+      child.stdin.end();
+    } else {
+      child.stdin.end();
+    }
+  });
+}
+
+function makeError(code: string, message: string, details?: unknown): ZerionError {
+  const err = new Error(message) as ZerionError;
+  err.code = code;
+  err.details = details;
+  return err;
+}
+
+// ── High-level helpers ────────────────────────────────────────────────
+
+export interface WalletInfo {
+  name: string;
+  evmAddress: string;
+  solAddress: string | null;
+  chains: string[];
+  createdAt: string;
+}
+
+export async function walletList(): Promise<WalletInfo[]> {
+  const out = await runZerion(["wallet", "list"]);
+  return out?.wallets ?? [];
+}
+
+export async function portfolio(walletName: string): Promise<any> {
+  return runZerion(["portfolio", "--wallet", walletName]);
+}
+
+export async function positions(walletName: string, mode: "all" | "simple" | "defi" = "simple"): Promise<any> {
+  return runZerion(["positions", "--wallet", walletName, "--positions", mode]);
+}
+
+export async function listPolicies(): Promise<any[]> {
+  const out = await runZerion(["agent", "list-policies"]);
+  return out?.policies ?? [];
+}
+
+export async function listAgentTokens(): Promise<any[]> {
+  const out = await runZerion(["agent", "list-tokens"]);
+  return out?.tokens ?? [];
+}
+
+export interface SwapArgs {
+  walletName: string;
+  chain: string;
+  amount: number;
+  fromToken: string;
+  toToken: string;
+  slippage?: number;
+}
+
+export async function swap(args: SwapArgs): Promise<any> {
+  const cliArgs = [
+    "swap",
+    args.chain,
+    String(args.amount),
+    args.fromToken,
+    args.toToken,
+    "--wallet", args.walletName,
+  ];
+  if (args.slippage != null) cliArgs.push("--slippage", String(args.slippage));
+  return runZerion(cliArgs);
+}
+
+export interface SolanaSwapArgs {
+  walletName: string;
+  amount: number;
+  fromToken: string;
+  toToken: string;
+  slippage?: number;
+}
+
+export async function swapSolana(args: SolanaSwapArgs): Promise<any> {
+  const cliArgs = [
+    "swap",
+    "solana",
+    String(args.amount),
+    args.fromToken,
+    args.toToken,
+    "--wallet", args.walletName,
+  ];
+  if (args.slippage != null) cliArgs.push("--slippage", String(args.slippage));
+  return runZerion(cliArgs);
+}
+
+/**
+ * Search for tokens by symbol/name. Used by the basket builder UI to validate
+ * that a user-supplied symbol resolves to something tradeable on the chain.
+ */
+export async function searchToken(query: string): Promise<any> {
+  return runZerion(["search", query]);
+}
+
+export async function listSwapTokens(chain?: string): Promise<any> {
+  const args = ["swap", "tokens"];
+  if (chain) args.push(chain);
+  return runZerion(args);
+}

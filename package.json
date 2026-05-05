@@ -1,0 +1,38 @@
+{
+  "name": "zerion-ta-rebalancer",
+  "version": "0.1.0",
+  "description": "Self-hostable, TA-driven crypto portfolio rebalancer built on Zerion CLI. Web dashboard + Telegram bot. Hourly auto-rebalance with policy-bounded agent tokens.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "setup": "tsx scripts/setup.ts",
+    "build:web": "vite build --root web",
+    "dev:web": "vite --root web",
+    "build": "npm run build:web",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test src/**/*.test.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.0",
+    "better-sqlite3": "^11.3.0",
+    "dotenv": "^16.4.5",
+    "grammy": "^1.30.0",
+    "hono": "^4.6.0",
+    "node-cron": "^3.0.3",
+    "technicalindicators": "^3.1.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.7.0",
+    "@types/node-cron": "^3.0.11",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  },
+  "license": "MIT"
+}
