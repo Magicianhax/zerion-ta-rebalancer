@@ -11,3 +11,9 @@ data/
 .idea/
 *.tsbuildinfo
 coverage/
+
+# Internal / private — never push these to a public repo
+.submission/
+.notes/
+*.private.md
+TODO.private.md
