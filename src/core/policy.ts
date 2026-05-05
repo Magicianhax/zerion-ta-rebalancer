@@ -26,8 +26,13 @@ export function evaluateGuards(input: GuardInputs): GuardOutcome {
     return { allow: false, reason: "Basket is paused — toggle it in the dashboard to resume." };
   }
 
-  // 1. Cooldown
-  if (input.lastRebalance) {
+  const isFirstRebalance =
+    input.lastRebalance == null ||
+    !input.lastRebalance.guardOutcome.allow ||
+    input.lastRebalance.swaps.length === 0;
+
+  // 1. Cooldown — only meaningful once we have an allowed prior rebalance
+  if (input.lastRebalance && input.lastRebalance.guardOutcome.allow) {
     const last = new Date(input.lastRebalance.startedAt).getTime();
     const minutesSince = (now.getTime() - last) / 60_000;
     if (minutesSince < config.cooldownMinutes) {
@@ -38,16 +43,21 @@ export function evaluateGuards(input: GuardInputs): GuardOutcome {
     }
   }
 
-  // 2. Max drift per rebalance — refuse if any single token shifts > maxDriftPercent
-  const driftLimit = config.maxDriftPercent / 100;
-  for (const [sym, target] of Object.entries(input.targetWeights)) {
-    const current = input.currentWeights[sym] ?? 0;
-    const drift = Math.abs(target - current);
-    if (drift > driftLimit) {
-      return {
-        allow: false,
-        reason: `Drift guard — ${sym} would shift ${(drift * 100).toFixed(1)}% (limit ${config.maxDriftPercent}%).`,
-      };
+  // 2. Max drift per rebalance — skipped on the first allocation since going
+  //    from all-quote to target weights necessarily moves each token by more
+  //    than the per-tick drift cap. The cap is meant to prevent churn on
+  //    later rebalances, not block initial allocation.
+  if (!isFirstRebalance) {
+    const driftLimit = config.maxDriftPercent / 100;
+    for (const [sym, target] of Object.entries(input.targetWeights)) {
+      const current = input.currentWeights[sym] ?? 0;
+      const drift = Math.abs(target - current);
+      if (drift > driftLimit) {
+        return {
+          allow: false,
+          reason: `Drift guard — ${sym} would shift ${(drift * 100).toFixed(1)}% (limit ${config.maxDriftPercent}%).`,
+        };
+      }
     }
   }
 
