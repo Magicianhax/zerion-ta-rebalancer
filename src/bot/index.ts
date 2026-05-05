@@ -26,7 +26,10 @@ import type { Basket, RebalanceResult } from "../types.ts";
 
 async function fetchBalance(basket: Basket): Promise<string> {
   try {
-    const raw = await positions(basket.walletName, "simple");
+    const raw = await positions(basket.walletName, {
+      mode: "simple",
+      chain: basket.chain,
+    });
     const { totalUsd, byToken, rawSymbols } = summarizePositions(raw, basket);
     if (totalUsd === 0) {
       const seen = rawSymbols.length

@@ -118,8 +118,23 @@ export async function portfolio(walletName: string): Promise<any> {
   return runZerion(["portfolio", "--wallet", walletName]);
 }
 
-export async function positions(walletName: string, mode: "all" | "simple" | "defi" = "simple"): Promise<any> {
-  return runZerion(["positions", "--wallet", walletName, "--positions", mode]);
+export interface PositionsOptions {
+  mode?: "all" | "simple" | "defi";
+  /** Chain filter (basket.chain) — REQUIRED for Solana wallets, since
+   *  zerion CLI defaults `--wallet` lookups to the EVM address. Passing
+   *  `chain: 'solana'` makes it use the Solana address from the same wallet. */
+  chain?: string;
+}
+
+export async function positions(
+  walletName: string,
+  options: PositionsOptions | "all" | "simple" | "defi" = {},
+): Promise<any> {
+  const opts: PositionsOptions =
+    typeof options === "string" ? { mode: options } : options;
+  const args = ["positions", "--wallet", walletName, "--positions", opts.mode ?? "simple"];
+  if (opts.chain) args.push("--chain", opts.chain);
+  return runZerion(args);
 }
 
 export async function listPolicies(): Promise<any[]> {

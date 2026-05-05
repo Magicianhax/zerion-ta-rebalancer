@@ -117,8 +117,12 @@ export async function rebalance(basketId: string): Promise<RebalanceResult> {
   const startedAt = new Date().toISOString();
   events.emit("rebalance:start", { basketId, startedAt });
 
-  // 1. Current portfolio
-  const positionsRaw = await positions(basket.walletName, "simple").catch((e) => {
+  // 1. Current portfolio — pass basket.chain so the CLI queries the right
+  //    address (EVM by default; Solana wallets need --chain solana)
+  const positionsRaw = await positions(basket.walletName, {
+    mode: "simple",
+    chain: basket.chain,
+  }).catch((e) => {
     process.stderr.write(`positions() failed: ${e.message}\n`);
     return null;
   });

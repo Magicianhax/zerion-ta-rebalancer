@@ -144,7 +144,10 @@ api.get("/baskets/:id/portfolio", async (c) => {
   const basket = getBasket(id);
   if (!basket) return c.json({ error: { code: "not_found" } }, 404);
   try {
-    const raw = await positions(basket.walletName, "simple");
+    const raw = await positions(basket.walletName, {
+      mode: "simple",
+      chain: basket.chain,
+    });
     const summary = summarizePositions(raw, basket);
     const weights: Record<string, number> = {};
     for (const [sym, usd] of Object.entries(summary.byToken)) {

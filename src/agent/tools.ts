@@ -95,7 +95,10 @@ const getPortfolioTool = tool(
   async ({ basketId }) => {
     const basket = getBasket(basketId);
     if (!basket) throw new Error(`Basket "${basketId}" not found`);
-    const raw = await positions(basket.walletName, "simple").catch(() => null);
+    const raw = await positions(basket.walletName, {
+      mode: "simple",
+      chain: basket.chain,
+    }).catch(() => null);
     if (!raw) {
       return jsonResult({ totalUsd: 0, byToken: {}, currentWeights: {}, note: "Wallet unfunded or unreachable" });
     }
