@@ -5,12 +5,17 @@
 
 import { config } from "./config.ts";
 import { initDb } from "./core/db.ts";
+import { syncZerionConfig } from "./core/zerion-config-sync.ts";
 import { startServer } from "./api/server.ts";
 import { startCron } from "./cron.ts";
 import { startBot } from "./bot/index.ts";
 
 async function main() {
   initDb();
+  const synced = await syncZerionConfig();
+  if (synced) {
+    process.stdout.write("Synced ZERION_API_KEY into ~/.zerion/config.json — direct `zerion` commands will work now.\n");
+  }
 
   const server = startServer();
   const cron = startCron();

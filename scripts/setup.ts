@@ -16,6 +16,7 @@ import { stdin, stdout, stderr } from "node:process";
 import { existsSync } from "node:fs";
 import { config } from "../src/config.ts";
 import { initDb } from "../src/core/db.ts";
+import { syncZerionConfig } from "../src/core/zerion-config-sync.ts";
 
 /**
  * Open readline only for the duration of one prompt, then close it.
@@ -136,6 +137,11 @@ async function main() {
   }
 
   initDb();
+
+  const synced = await syncZerionConfig();
+  if (synced) {
+    stdout.write("✓ Synced ZERION_API_KEY into ~/.zerion/config.json so direct `zerion` commands work.\n\n");
+  }
 
   // ── Step 1: wallet ─────────────────────────────────────────────────
   stdout.write("Step 1 — Wallet\n");
