@@ -17,7 +17,7 @@ import {
 } from "../core/db.ts";
 import { events, rebalance } from "../core/rebalancer.ts";
 import { listTokens } from "../core/token-registry.ts";
-import { listAgentTokens, listPolicies, walletList } from "../core/zerion.ts";
+import { listAgentTokens, listPolicies, positions, walletList } from "../core/zerion.ts";
 import type { Basket, Chain } from "../types.ts";
 import { config } from "../config.ts";
 
@@ -136,6 +136,42 @@ api.get("/tokens", (c) => {
     return c.json({ error: { code: "invalid_chain" } }, 400);
   }
   return c.json({ tokens: listTokens(chain) });
+});
+
+api.get("/baskets/:id/portfolio", async (c) => {
+  const id = c.req.param("id");
+  const basket = getBasket(id);
+  if (!basket) return c.json({ error: { code: "not_found" } }, 404);
+  try {
+    const raw = await positions(basket.walletName, "simple");
+    const items: any[] = raw?.positions ?? raw?.data ?? [];
+    const want = new Set(basket.tokens.map((t) => t.symbol.toUpperCase()));
+    want.add(basket.quoteToken.toUpperCase());
+    const byToken: Record<string, number> = {};
+    let total = 0;
+    for (const item of items) {
+      const sym = (item.symbol ?? item.fungible?.symbol ?? "").toUpperCase();
+      if (!want.has(sym)) continue;
+      const value = Number(item.value_usd ?? item.value ?? item.usd_value ?? 0);
+      if (!Number.isFinite(value) || value <= 0) continue;
+      byToken[sym] = (byToken[sym] ?? 0) + value;
+      total += value;
+    }
+    const weights: Record<string, number> = {};
+    for (const [sym, usd] of Object.entries(byToken)) {
+      weights[sym] = total > 0 ? usd / total : 0;
+    }
+    return c.json({
+      portfolio: {
+        totalUsd: Math.round(total * 100) / 100,
+        byToken,
+        currentWeights: weights,
+        fetchedAt: new Date().toISOString(),
+      },
+    });
+  } catch (e: any) {
+    return c.json({ error: { code: "zerion_error", message: e.message } }, 500);
+  }
 });
 
 api.get("/wallets", async (c) => {

@@ -61,6 +61,8 @@ export const api = {
     request<{ result: RebalanceResult }>(`/baskets/${id}/rebalance`, { method: "POST" }),
   listRebalances: (id: string, limit = 50) =>
     request<{ rebalances: RebalanceResult[] }>(`/baskets/${id}/rebalances?limit=${limit}`),
+  getPortfolio: (id: string) =>
+    request<{ portfolio: Portfolio }>(`/baskets/${id}/portfolio`),
   listTokens: (chain: "base" | "solana") => request<{ tokens: TokenEntry[] }>(`/tokens?chain=${chain}`),
   listWallets: () => request<{ wallets: WalletInfo[] }>("/wallets"),
   listPolicies: () => request<{ policies: any[] }>("/agent/policies"),
@@ -158,6 +160,13 @@ export interface SwapPlan {
   toToken: string;
   amountFrom: number;
   estimatedUsd: number;
+}
+
+export interface Portfolio {
+  totalUsd: number;
+  byToken: Record<string, number>;
+  currentWeights: Record<string, number>;
+  fetchedAt: string;
 }
 
 export interface RebalanceResult {

@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { Pause, Play, RefreshCw, Trash2, ChevronDown, ChevronUp } from "lucide-react";
-import { api, type Basket, type RebalanceResult } from "../api.ts";
+import { Pause, Play, RefreshCw, Trash2, ChevronDown, ChevronUp, Wallet } from "lucide-react";
+import { api, type Basket, type Portfolio, type RebalanceResult } from "../api.ts";
 
 export default function BasketCard({ basket, onChange }: { basket: Basket; onChange: () => void }) {
   const [history, setHistory] = useState<RebalanceResult[] | null>(null);
+  const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -11,6 +12,14 @@ export default function BasketCard({ basket, onChange }: { basket: Basket; onCha
     let alive = true;
     api.listRebalances(basket.id, 5).then((r) => alive && setHistory(r.rebalances)).catch(() => {});
     return () => { alive = false; };
+  }, [basket.id]);
+
+  useEffect(() => {
+    let alive = true;
+    const fetch = () => api.getPortfolio(basket.id).then((r) => alive && setPortfolio(r.portfolio)).catch(() => {});
+    fetch();
+    const interval = setInterval(fetch, 30_000);
+    return () => { alive = false; clearInterval(interval); };
   }, [basket.id]);
 
   const last = history?.[0];
@@ -51,14 +60,34 @@ export default function BasketCard({ basket, onChange }: { basket: Basket; onCha
           </div>
         </div>
 
+        {portfolio && (
+          <div className="mb-3 flex items-center justify-between text-xs bg-ink-900/40 border border-ink-700 rounded-lg px-3 py-2">
+            <div className="flex items-center gap-2 text-ink-400">
+              <Wallet className="w-3.5 h-3.5" />
+              <span>Wallet balance</span>
+            </div>
+            <div className="font-mono text-ink-100">
+              ${portfolio.totalUsd.toFixed(2)}
+            </div>
+          </div>
+        )}
+
         <div className="space-y-1.5">
           {basket.tokens.map((t) => {
-            const current = last?.proposal.currentWeights[t.symbol.toUpperCase()] ?? 0;
-            const target = last?.proposal.targetWeights[t.symbol.toUpperCase()] ?? t.initialWeight;
+            const sym = t.symbol.toUpperCase();
+            const current =
+              portfolio?.currentWeights[sym] ??
+              last?.proposal.currentWeights[sym] ??
+              0;
+            const target = last?.proposal.targetWeights[sym] ?? t.initialWeight;
+            const usd = portfolio?.byToken[sym];
             return (
               <div key={t.symbol} className="text-xs">
                 <div className="flex justify-between mb-0.5">
-                  <span className="font-mono text-ink-200">{t.symbol}</span>
+                  <span className="font-mono text-ink-200">
+                    {t.symbol}
+                    {usd != null && <span className="text-ink-400 ml-2">${usd.toFixed(2)}</span>}
+                  </span>
                   <span className="text-ink-400">
                     {(current * 100).toFixed(1)}% → <span className="text-accent">{(target * 100).toFixed(1)}%</span>
                   </span>

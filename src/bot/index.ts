@@ -19,8 +19,41 @@ import {
   setBasketEnabled,
 } from "../core/db.ts";
 import { events } from "../core/rebalancer.ts";
+import { positions } from "../core/zerion.ts";
 import { handleChatMessage, resetConversation } from "../agent/index.ts";
-import type { RebalanceResult } from "../types.ts";
+import type { Basket, RebalanceResult } from "../types.ts";
+
+async function fetchBalance(basket: Basket): Promise<string> {
+  try {
+    const raw = await positions(basket.walletName, "simple");
+    const items: any[] = raw?.positions ?? raw?.data ?? [];
+    const want = new Set(basket.tokens.map((t) => t.symbol.toUpperCase()));
+    want.add(basket.quoteToken.toUpperCase());
+    const byToken: Record<string, number> = {};
+    let total = 0;
+    for (const item of items) {
+      const sym = (item.symbol ?? item.fungible?.symbol ?? "").toUpperCase();
+      if (!want.has(sym)) continue;
+      const value = Number(item.value_usd ?? item.value ?? item.usd_value ?? 0);
+      if (!Number.isFinite(value) || value <= 0) continue;
+      byToken[sym] = (byToken[sym] ?? 0) + value;
+      total += value;
+    }
+    if (total === 0) {
+      return `*${basket.name}* (${basket.chain}) — wallet \`${basket.walletName}\` is empty. Fund it with USDC + gas to start.`;
+    }
+    const tokenLines = Object.entries(byToken)
+      .sort((a, b) => b[1] - a[1])
+      .map(
+        ([sym, usd]) =>
+          `  ${sym.padEnd(6)} $${usd.toFixed(2).padStart(7)} (${((usd / total) * 100).toFixed(1)}%)`,
+      )
+      .join("\n");
+    return `*${basket.name}* (${basket.chain}) — *$${total.toFixed(2)}* total\n\`\`\`\n${tokenLines}\n\`\`\``;
+  } catch (e: any) {
+    return `*${basket.name}* — error fetching balance: ${e.message}`;
+  }
+}
 
 function formatRebalance(r: RebalanceResult): string {
   const basket = getBasket(r.basketId);
@@ -70,6 +103,18 @@ export async function startBot() {
   });
 
   bot.command("ping", (ctx) => ctx.reply("pong"));
+
+  bot.command("balance", async (ctx) => {
+    const baskets = listBaskets();
+    if (baskets.length === 0) return ctx.reply("No baskets configured yet.");
+    await ctx.api.sendChatAction(ctx.chat.id, "typing");
+    const lines: string[] = [];
+    for (const b of baskets) {
+      const summary = await fetchBalance(b);
+      lines.push(summary);
+    }
+    return ctx.reply(lines.join("\n\n"), { parse_mode: "Markdown" });
+  });
 
   bot.command("reset", async (ctx) => {
     resetConversation(String(ctx.chat.id));
