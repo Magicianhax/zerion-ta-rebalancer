@@ -26,14 +26,21 @@ export function evaluateGuards(input: GuardInputs): GuardOutcome {
     return { allow: false, reason: "Basket is paused — toggle it in the dashboard to resume." };
   }
 
-  const isFirstRebalance =
-    input.lastRebalance == null ||
-    !input.lastRebalance.guardOutcome.allow ||
-    input.lastRebalance.swaps.length === 0;
+  // A "real" prior rebalance means: allowed AND actually fired swaps. A run
+  // that was allowed but had zero swaps (e.g. wallet was empty) is not a
+  // real prior rebalance — neither cooldown nor drift guard should be
+  // anchored on it.
+  const lastRealRebalance =
+    input.lastRebalance &&
+    input.lastRebalance.guardOutcome.allow &&
+    input.lastRebalance.swaps.length > 0
+      ? input.lastRebalance
+      : null;
+  const isFirstRebalance = lastRealRebalance == null;
 
-  // 1. Cooldown — only meaningful once we have an allowed prior rebalance
-  if (input.lastRebalance && input.lastRebalance.guardOutcome.allow) {
-    const last = new Date(input.lastRebalance.startedAt).getTime();
+  // 1. Cooldown — only meaningful once we have a real prior rebalance
+  if (lastRealRebalance) {
+    const last = new Date(lastRealRebalance.startedAt).getTime();
     const minutesSince = (now.getTime() - last) / 60_000;
     if (minutesSince < config.cooldownMinutes) {
       return {
