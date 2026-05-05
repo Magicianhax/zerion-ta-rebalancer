@@ -1,136 +1,124 @@
 # Zerion TA Rebalancer
 
-> Self-hostable, TA-driven crypto portfolio rebalancer. Runs every hour, rebalances autonomously, and chats with you in plain English over Telegram or the web. Built on top of [Zerion CLI](https://github.com/zeriontech/zerion-ai) with policy-bounded agent tokens — the bot literally cannot transact outside the rules you set.
+**Self-hosted, policy-bounded crypto portfolio rebalancer. Runs on your laptop or VPS. Talks to you in plain English.**
 
-![Status: alpha](https://img.shields.io/badge/status-alpha-orange) ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
+Set up a basket of tokens once. The rebalancer holds them at the weights you set, and every hour quietly nudges allocations based on technical signals — RSI, MACD, EMA, volume, volatility. You can ask it questions, pause it, override it. It cannot lose your funds outside the limits you set, because the wallet itself refuses to sign anything outside your policy.
 
-## What it does
+![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Self-hosted](https://img.shields.io/badge/self--hosted-100%25-green) ![No SaaS](https://img.shields.io/badge/no%20SaaS-no%20fees-blueviolet)
 
-1. You define a basket: pick tokens (Solana or Base), set a budget in USDC, set initial weights.
-2. The setup wizard creates an encrypted wallet, mints a scoped agent token, and attaches a tight policy: chain-lock + deny-transfers + deny-approvals + daily transaction cap.
-3. You fund the wallet (small amount of USDC + native gas).
-4. Every hour, the rebalancer:
-   - Pulls 4-hour OHLCV for each token from GeckoTerminal
-   - Computes RSI, MACD, EMA, ATR, volume trend → composite score per token
-   - Proposes new weights (blended with your initial bias)
-   - Runs guard checks (cooldown, max drift, slippage)
-   - Routes approved swaps through Zerion API
-5. The web dashboard shows live wallet balance and weight charts. The Telegram bot pushes notifications and answers chat queries with a Claude agent.
+---
 
-## Why it's safe — three layers of policy
+## Why use it
 
-The agent can be compromised, buggy, or misconfigured, and your funds still hold:
+Most "auto-rebalancing" tools are custodial — you give a company control of your funds. This is the opposite:
 
-| Layer | Enforced by | Stops |
+- **Your keys, your machine.** The wallet's encrypted keystore lives on your hard drive (or VPS). No third-party custody.
+- **The bot can't go rogue.** Even if the rebalancer code is hacked tomorrow, the agent token can only do what the wallet's policy allows. Wrong chain → refused. Send transfer → refused. Over the daily transaction cap → refused.
+- **No subscription, no fees beyond gas.** Self-host, free forever. (Zerion's API has a free tier; the rest is your laptop's electricity.)
+- **Real transparency.** Read the source. Watch the cron tick. Ask the agent why it did what it did. No black box.
+
+## Who this is for
+
+| You are | What you'll get |
+|---|---|
+| A long-term crypto holder tired of manually rebalancing | Hourly automation, hands-off |
+| A trader who wants TA-driven allocation but not a bot you can't audit | Open source, deterministic math, plain-English reasoning |
+| A developer who wants to extend an autonomous on-chain agent | Hackable in TypeScript, every layer is a separate file |
+| A privacy-minded user who refuses cloud custody | Single binary on your hardware, no telemetry |
+
+## How it works in 30 seconds
+
+1. **Setup wizard** runs once. Creates an encrypted wallet, mints a scoped agent token, attaches a tight policy (chain-locked, no transfers, no approvals, daily transaction cap).
+2. **You fund the wallet** with a small amount of USDC + native gas.
+3. **You define a basket** in the web dashboard: which tokens, what initial weights, how much to follow TA vs your bias.
+4. **Cron fires every hour.** The rebalancer fetches OHLCV from GeckoTerminal, computes a composite TA score per token, proposes new weights, runs guard checks, and routes any approved swaps through the Zerion API. The Claude agent narrates each decision in plain English.
+5. **You watch it work** in the web dashboard or chat with it on Telegram.
+
+## Three layers of policy — why it's safe
+
+The agent can't bypass any of these. They run independently and AND together:
+
+| Layer | Where | Stops |
 |---|---|---|
-| **OWS built-in** | Cryptographic, at signing | Wrong chain, wrong token, transfers, approvals, post-expiry signing |
-| **OWS executable** (`spend-cap.mjs`) | Script run by the OWS dispatcher | Daily transaction cap exceeded |
-| **App-layer guards** | Backend code | Excessive drift, churn, slippage, dust swaps |
+| **OWS built-in (cryptographic)** | Wallet signing layer (Rust binding) | Wrong chain · Wrong token · Native transfers · ERC-20 approvals · Post-expiry signing |
+| **OWS executable (`spend-cap.mjs`)** | Script run inside the OWS dispatcher | More than N transactions per 24h |
+| **App-layer guards** | Backend code in `src/core/policy.ts` | Drift > 10% per tick · Cooldown < 45 min · Slippage > 2% · Dust swaps |
 
-If layers 1 and 2 are bypassed, the wallet still doesn't sign anything outside the policy — those checks live in OWS, not in our code.
+Even if a hacker stole your agent token from disk and replaced our code with their own, the wallet still refuses to sign anything outside layer 1 + 2. Read [docs/POLICY.md](./docs/POLICY.md) for the full breakdown.
 
-## Two ways to authenticate the agent
+## Setup
 
-The reasoning agent uses the [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-typescript) — same SDK that powers Claude Code. It supports two auth modes:
+> **Windows users:** the underlying [Zerion CLI](https://github.com/zeriontech/zerion-ai) ships native Linux/macOS binaries only. Run inside WSL2 (Ubuntu) — same files, same commands.
 
-| Mode | Best for | How |
-|---|---|---|
-| **Claude Code subscription** | Personal self-hosted use | Run `claude login` once. The SDK reads `~/.claude/.credentials.json` and bills against your existing Pro/Team/Max plan. |
-| **Anthropic API key** | VPS / shared deployments | Set `ANTHROPIC_API_KEY=sk-ant-...` in `.env`. Direct per-token billing. |
+### Prerequisites
 
-If neither is set, the agent stays disabled — cron runs deterministic rebalances (TA only, no reasoning text), and Telegram tells the user chat is off. You still get the auto-rebalancer working.
+- **Node.js 22+** ([install via nvm](https://github.com/nvm-sh/nvm))
+- **A Zerion API key** — free tier is enough. Sign up: [dashboard.zerion.io](https://dashboard.zerion.io)
+- **One of:**
+  - **Claude Code subscription** (Pro/Team/Max) — install with `npm install -g @anthropic-ai/claude-code`, then `claude login`. The agent uses your existing plan, no extra cost.
+  - **Anthropic API key** from [console.anthropic.com](https://console.anthropic.com) — direct per-token billing.
+  - **Neither** — agent reasoning is disabled but TA-driven rebalancing still works (cron fires deterministic swaps).
+- **Optional: Telegram bot token** from [@BotFather](https://t.me/BotFather) for chat + push notifications.
 
-## Quickstart — laptop
-
-> **Windows users:** the underlying [Zerion CLI](https://github.com/zeriontech/zerion-ai) has no Windows native binding. Run inside WSL2 (Ubuntu) — see [docs/WSL.md](./docs/WSL.md).
-
-### 1. Prerequisites
-
-- **Node.js 20+** — `nvm install 22` is easiest
-- **Git** — for cloning
-- **A Zerion API key** — free at [dashboard.zerion.io](https://dashboard.zerion.io)
-- **Either:**
-  - Claude Code installed and logged in (`npm install -g @anthropic-ai/claude-code` → `claude login`), OR
-  - An Anthropic API key from [console.anthropic.com](https://console.anthropic.com)
-- **Optional:** Telegram bot token from [@BotFather](https://t.me/BotFather)
-
-### 2. Clone and configure
+### Install
 
 ```bash
-git clone https://github.com/<you>/zerion-ta-rebalancer.git
+# 1. Clone this repo and the forked Zerion CLI as siblings
+git clone https://github.com/Magicianhax/zerion-ta-rebalancer.git
+git clone https://github.com/Magicianhax/zerion-ai.git
+
 cd zerion-ta-rebalancer
 
-# Also clone the forked Zerion CLI into a sibling directory:
-git clone https://github.com/<you>/zerion-ai.git ../zerion-ai
+# 2. Configure
+cp .env.example .env
+# Edit .env: set ZERION_API_KEY and ADMIN_PASSWORD (8+ chars).
+# If using API key auth, also set ANTHROPIC_API_KEY.
+# If using Claude Code subscription, leave ANTHROPIC_API_KEY empty.
+
+# 3. Install the forked CLI's dependencies
 cd ../zerion-ai && npm install --legacy-peer-deps && cd ../zerion-ta-rebalancer
 
-cp .env.example .env
-```
-
-Edit `.env`:
-
-```bash
-# Required
-ZERION_API_KEY=zk_your_key_here
-ADMIN_PASSWORD=at-least-eight-chars
-
-# Anthropic auth — pick ONE (or skip both for deterministic mode)
-# Option A: Claude Code subscription (free if you have a plan, requires `claude login`)
-ANTHROPIC_API_KEY=
-# Option B: API key (per-token billing)
-# ANTHROPIC_API_KEY=sk-ant-api03-...
-
-# Optional: Telegram
-TELEGRAM_BOT_TOKEN=
-
-# Defaults usually fine
-ZERION_CLI_PATH=../zerion-ai/cli/zerion.js
-DEFAULT_CHAIN=solana
-ANTHROPIC_MODEL=claude-sonnet-4-6
-```
-
-### 3. Install and build
-
-```bash
+# 4. Install rebalancer dependencies (this also builds the web dashboard)
 npm install --legacy-peer-deps
-npm run build      # builds web SPA
+npm run build
 ```
 
-### 4. Run the setup wizard
+### Run the setup wizard
+
+One-time step that creates your wallet, policy, and agent token:
 
 ```bash
 npm run setup
 ```
 
-Walks you through:
+The wizard will:
 
-1. **Wallet** — name it, set a passphrase. **Pick a strong passphrase, write it down.** OWS encrypts the wallet at rest with this; there is no recovery without it.
-2. **Policy** — chain (`solana` or `base`), daily tx cap (8-20 is sane), expiry (30 days default).
-3. **Agent token** — re-enter the passphrase once to mint the scoped credential.
-4. **Recovery phrase** — say yes when offered. Write the 12-word mnemonic on paper. **This is the only true backup.**
-5. **Funding** — note the deposit address shown.
+1. **Create an encrypted wallet.** You choose a passphrase. **Write it down on paper before pressing Enter.** OWS encrypts the keystore with this passphrase; there is no recovery without it.
+2. **Create a policy.** Default settings are sensible: chain-locked to Solana (or Base), 8-20 swaps per 24 hours, 30-day expiry. You can override any of these.
+3. **Mint an agent token.** The token is bound to your wallet and the policy. It's what the rebalancer uses to sign — never the master passphrase.
+4. **Show your recovery phrase.** **Write down the 12 words on paper.** This is the only true backup. The mnemonic works in MetaMask, Phantom, and any other BIP-39 wallet.
+5. **Show your deposit address.** Send a small amount of USDC + native gas (SOL or ETH) here.
 
-The wizard automatically syncs your `ZERION_API_KEY` into Zerion CLI's own config, so you can run `zerion ...` commands directly afterward.
-
-### 5. Fund the wallet
+### Fund the wallet
 
 ```bash
-node ../zerion-ai/cli/zerion.js wallet fund --wallet <your-wallet-name>
+node ../zerion-ai/cli/zerion.js wallet fund --wallet <name>
 ```
 
-Send a small amount of USDC + native gas to the address shown:
-- **Solana:** USDC + ~0.05 SOL for fees
-- **Base:** USDC + ~$0.50 worth of ETH for fees
+Sensible starting amounts:
 
-Demo-sized funding ($5-10) is enough to verify everything works.
+- **Solana:** 10–50 USDC + 0.1 SOL for fees
+- **Base:** 10–50 USDC + ~$2 worth of ETH for fees
 
-### 6. Boot
+You can run with as little as $5; the rebalancer handles dust thresholds gracefully and skips trades below $1.
+
+### Boot
 
 ```bash
 npm start
 ```
 
-Output:
+You'll see:
 
 ```
 Zerion TA Rebalancer ready
@@ -139,41 +127,50 @@ Zerion TA Rebalancer ready
   → Telegram bot:  running
 ```
 
-### 7. Use it
+### Use it
 
-**Web dashboard** at `http://localhost:3000`:
-- Log in with `ADMIN_PASSWORD`
-- Click **New basket**, walk through the 3 steps (chain → tokens & weights → wallet/policy/token)
-- Each card shows live wallet balance polled every 30s
-- Click **Rebalance now** to fire the first allocation
+**Web dashboard** — open `http://localhost:3000`, log in with `ADMIN_PASSWORD`. Click **New basket**, walk the 3-step form, hit **Rebalance now**.
 
-**Telegram bot:**
-- Open chat with your bot, run `/start`
-- Generate a pairing code in the dashboard's Settings panel, send `/start <code>` to bind your chat
-- Useful commands:
-  - `/status` — basket overview
-  - `/balance` — live wallet balance per basket
-  - `/pause <basket>` / `/resume <basket>`
-  - `/reset` — clear chat history
-  - **Plain text** — talks to the Claude agent, can ask anything ("how is my basket doing?", "why did you sell SOL yesterday?")
+**Telegram** — open the chat with your bot:
 
-## Quickstart — VPS
+| Command | What it does |
+|---|---|
+| `/start <pairing-code>` | Bind this chat (generate code in dashboard Settings) |
+| `/status` | One-line per basket — chain, budget, active/paused |
+| `/balance` | Live USD value per basket, broken down by token |
+| `/pause <basket>` / `/resume <basket>` | Toggle a basket |
+| `/reset` | Clear chat history with the agent |
+| Anything else (plain text) | Talks to the Claude agent — ask anything |
 
-Same as laptop, with two additions:
+Examples of plain-text questions you can ask:
 
-```bash
-# Reverse proxy with HTTPS via Caddy
+- *"how is my Solana basket doing?"*
+- *"why did you sell BONK yesterday?"*
+- *"what's the TA say about JUP right now?"*
+- *"should I add USDC?"*
+- *"pause the basket — I'm worried about the market"*
+
+The agent uses real tools to look up live data; it doesn't guess.
+
+## Run on a VPS
+
+Same install steps as laptop. For HTTPS, put a reverse proxy in front:
+
+**Caddyfile** (the simplest path):
+
+```
 your.domain.com {
   reverse_proxy localhost:3000
 }
 ```
 
-Or with Docker:
+**Or with Docker:**
 
 ```bash
 docker build -t zerion-rebalancer .
 docker run -d \
   --name rebalancer \
+  --restart unless-stopped \
   -p 3000:3000 \
   -v $(pwd)/data:/app/data \
   -v $HOME/.zerion:/root/.zerion \
@@ -181,50 +178,63 @@ docker run -d \
   zerion-rebalancer
 ```
 
-Mount `~/.zerion` so the encrypted wallet survives container restarts.
+Mount `~/.zerion` so your wallet keystore survives container restarts. Mount `./data` for the SQLite database.
+
+**Process supervision** — for systemd or PM2 setups, the binary runs in foreground and handles SIGINT/SIGTERM cleanly. No special flags needed.
 
 ## Configuration reference
 
-Full list in [.env.example](./.env.example). The key knobs:
+| Variable | Default | Required | Notes |
+|---|---|---|---|
+| `ZERION_API_KEY` | — | yes | Get one at [dashboard.zerion.io](https://dashboard.zerion.io) |
+| `ADMIN_PASSWORD` | — | yes | 8+ chars. Used as the bearer token for the web UI. |
+| `ANTHROPIC_API_KEY` | empty | no | Set to use direct API billing. Empty + Claude Code logged in = subscription billing. |
+| `ANTHROPIC_MODEL` | `claude-sonnet-4-6` | no | `claude-opus-4-7` for max intelligence; `claude-haiku-4-5` for cheap chat |
+| `TELEGRAM_BOT_TOKEN` | empty | no | Disables bot if empty |
+| `REBALANCE_CRON` | `0 * * * *` | no | Standard cron syntax. Top of every hour by default. |
+| `MAX_DRIFT_PERCENT` | 10 | no | App-layer churn guard. Skipped on first allocation. |
+| `REBALANCE_COOLDOWN_MINUTES` | 45 | no | Between rebalances on the same basket |
+| `DEFAULT_SLIPPAGE` | 2 | no | Percent. Failed swaps log to stderr and continue. |
+| `DEFAULT_CHAIN` | `solana` | no | New baskets default to this chain |
+| `PORT` | 3000 | no | Web server port |
+| `ZERION_CLI_PATH` | `../zerion-ai/cli/zerion.js` | no | Path to the forked CLI |
 
-| Variable | Default | What |
-|---|---|---|
-| `ZERION_API_KEY` | required | Get one at [dashboard.zerion.io](https://dashboard.zerion.io) |
-| `ADMIN_PASSWORD` | required | Bearer token for the web UI (8+ chars) |
-| `ANTHROPIC_API_KEY` | empty | Set to use direct API; leave empty to use Claude Code subscription |
-| `ANTHROPIC_MODEL` | `claude-sonnet-4-6` | `claude-opus-4-7` for max intelligence, `claude-haiku-4-5` for cheap chat |
-| `TELEGRAM_BOT_TOKEN` | empty | Disables bot if empty |
-| `REBALANCE_CRON` | `0 * * * *` | Top of every hour |
-| `MAX_DRIFT_PERCENT` | 10 | App-layer churn guard (skipped on first allocation) |
-| `REBALANCE_COOLDOWN_MINUTES` | 45 | Between rebalances on the same basket |
-| `DEFAULT_SLIPPAGE` | 2 | % tolerance on swaps |
-| `DEFAULT_CHAIN` | `solana` | Default for new baskets |
-
-## Architecture
-
-Single Node process serving everything: REST API, SSE stream, Vite-built React SPA, hourly cron, Telegram bot, Claude agent. SQLite for state.
+## What's under the hood
 
 ```
-┌─ src/index.ts ──────────────────────────────────────────┐
-│   ├─ startServer()  → Hono on :3000                     │
-│   ├─ startCron()    → hourly tick → agent.runHourlyTick │
-│   └─ startBot()     → grammy + agent.handleChatMessage  │
-├─────────────────────────────────────────────────────────┤
-│   src/agent/    Claude Agent SDK (query + MCP tools)    │
-│   src/core/     ta, ohlcv, rebalancer, zerion wrapper   │
-│   src/api/      Hono routes + SSE                       │
-│   web/          Vite + React + Tailwind dashboard       │
-│   scripts/      setup wizard                            │
-└─────────────────────────────────────────────────────────┘
+┌─ src/index.ts (single Node process) ──────────────────────────┐
+│                                                                │
+│   startServer()  → Hono on :3000                              │
+│      ├─ REST API + SSE stream                                 │
+│      └─ Static SPA (Vite-built React + Tailwind)              │
+│                                                                │
+│   startCron()    → node-cron, hourly                          │
+│      └─ for each enabled basket: agent.runHourlyTick()        │
+│                                                                │
+│   startBot()     → grammy + agent.handleChatMessage()         │
+│                                                                │
+│   src/agent/     Claude Agent SDK + in-process MCP tools      │
+│   src/core/      ta, ohlcv, rebalancer, zerion subprocess     │
+│   src/api/       Hono routes + SSE                            │
+│   web/           Vite + React + Tailwind dashboard            │
+│   scripts/       setup wizard                                 │
+│                                                                │
+│   data/rebalancer.db    SQLite (baskets, rebalances, chats)   │
+│   ~/.zerion/            OWS keystore (encrypted wallet)       │
+└────────────────────────────────────────────────────────────────┘
 ```
 
-Full architecture diagram: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
+Full details in [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 
-Policy story: [docs/POLICY.md](./docs/POLICY.md)
+## Documentation
 
-Wallet recovery: [docs/RECOVERY.md](./docs/RECOVERY.md)
-
-Demo script: [docs/DEMO.md](./docs/DEMO.md)
+| Doc | What's in it |
+|---|---|
+| [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | Process layout, data flow, why three policy layers |
+| [docs/POLICY.md](./docs/POLICY.md) | Every policy in detail, demo scenarios proving each one works |
+| [docs/RECOVERY.md](./docs/RECOVERY.md) | Three ways to recover your wallet (mnemonic, file copy, mobile pairing) |
+| [docs/DEMO.md](./docs/DEMO.md) | 4-minute screen-recording script |
+| [.env.example](./.env.example) | Every config variable, with the security model explained inline |
 
 ## Troubleshooting
 
@@ -234,34 +244,70 @@ Demo script: [docs/DEMO.md](./docs/DEMO.md)
 | `claude: command not found` | `npm install -g @anthropic-ai/claude-code` then `claude login` |
 | `Cannot find module '@open-wallet-standard/core-linux-x64-gnu'` | Reinstall after switching to WSL: `rm -rf node_modules && npm install --legacy-peer-deps` |
 | `missing_api_key` from a direct `zerion ...` command | Restart `npm start` once — it auto-syncs `ZERION_API_KEY` into Zerion's config |
-| Wallet balance shows $0 in UI/bot but you funded it | Wait 30-60 seconds — Zerion's indexer takes a moment for fresh deposits. If still empty, paste output of `node ../zerion-ai/cli/zerion.js positions --wallet <name> --pretty` |
-| Drift guard rejected first rebalance | Should be auto-skipped on first allocation. If you hit it, restart and try again |
-| Passphrase prompt looks corrupted in WSL terminal | Use Windows Terminal or PowerShell+WSL instead of VS Code's integrated terminal |
+| Wallet balance shows $0 in UI/bot | Ensure your basket's chain matches where you funded. Solana wallets need `--chain solana` (the rebalancer does this automatically; if you're testing direct CLI, add `--chain solana`). |
+| Drift guard rejected first rebalance | Should be auto-skipped on first allocation. If you hit it, restart the server and retry. |
+| Passphrase prompt looks corrupted in WSL terminal | Use Windows Terminal or a regular terminal emulator instead of VS Code's integrated terminal |
+| Swap failed with insufficient gas | Top up native gas (SOL on Solana, ETH on Base). Each swap costs ~0.001-0.002 SOL or a few cents in ETH. |
+| Tokens missing from the New Basket form | Add them to `src/core/token-registry.ts` with their address + a high-liquidity USDC pool address |
 
-## Development
+## FAQ
+
+**Is this custodial?**
+No. Your wallet is encrypted on your machine. We never see your keys; Zerion never sees your keys. The mnemonic is BIP-39, importable into any wallet.
+
+**What does it cost to run?**
+Zero. You pay gas fees on each swap (sub-cent on Base, ~$0.01 on Solana). If you use the Anthropic API for the chat agent, that's per-token; if you use Claude Code subscription, it's already included. Zerion has a free API tier that handles ~10K requests/month — far more than this app uses.
+
+**Can I run it without the Claude agent?**
+Yes. Leave `ANTHROPIC_API_KEY` empty and don't sign into Claude Code. The cron still fires hourly TA-driven rebalances. The Telegram bot will tell users that chat is disabled but `/balance`, `/pause`, `/resume`, `/status` still work.
+
+**What chains?**
+Solana and Base in v1. The Zerion CLI supports 60+ EVM chains; adding more is a matter of editing `src/core/token-registry.ts` to map symbols to pool addresses on that chain. Cross-chain rebalancing (a basket spanning Solana + Base) is not implemented in v1.
+
+**What tokens?**
+The shipped registry includes the most liquid tokens on each chain (SOL, BONK, JUP, WIF, JTO on Solana; ETH, AERO, DEGEN, BRETT, cbBTC on Base). Adding a new token = one entry in `src/core/token-registry.ts` with its address and main USDC pool.
+
+**How do I extend it?**
+- New TA indicator: add to `src/core/ta.ts` and adjust the weights map
+- New chain: add tokens to `src/core/token-registry.ts` + verify Zerion CLI supports it
+- New policy rule: write a `.mjs` script in the Zerion fork's `cli/policies/` and wire a flag in `cli/commands/agent/create-policy.js`
+- New tool the agent can call: register a `tool()` in `src/agent/tools.ts`
+- New REST endpoint: add to `src/api/routes.ts`
+
+**What happens if my laptop dies?**
+You restore from the recovery phrase on a new machine — `zerion wallet import --mnemonic`. Your funds are on-chain, not on your machine. The mnemonic is the only thing that matters.
+
+## Roadmap
+
+- [ ] Cross-chain baskets (Solana ↔ Base via bridges)
+- [ ] Multi-user mode (one server, many users)
+- [ ] Custom indicator support (user-defined formulas)
+- [ ] Backtest mode against historical OHLCV
+- [ ] More TA strategies as plugins
+- [ ] iOS/Android push notifications via APN/FCM in addition to Telegram
+
+PRs welcome.
+
+## Contributing
+
+The code is meant to be readable. If something feels confusing, that's a bug. Open an issue.
+
+For non-trivial changes, open a discussion first so we can align on approach. Make sure tests pass:
 
 ```bash
-npm install --legacy-peer-deps
-cd web && npm install --legacy-peer-deps && cd ..
-
-# Backend with auto-reload
-npm run dev
-
-# Web frontend with HMR (separate terminal)
-npm run dev:web    # serves at :5173, proxies API to :3000
-
-# Typecheck only
-npx tsc --noEmit
+npm test
 ```
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MIT — see [LICENSE](./LICENSE). Zero warranty. You run it; you own it; you're responsible for your funds.
 
 ## Credits
+
+Built on top of:
 
 - [Zerion CLI](https://github.com/zeriontech/zerion-ai) — wallet + execution layer
 - [Open Wallet Standard](https://github.com/open-wallet-standard/core) — wallet encryption + policy enforcement
 - [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-typescript) — reasoning agent
 - [GeckoTerminal](https://www.geckoterminal.com) — OHLCV data
-- [Hono](https://hono.dev), [grammy](https://grammy.dev), [Vite](https://vitejs.dev), [Tailwind](https://tailwindcss.com), [shadcn/ui](https://ui.shadcn.com) — stack
+- [Hono](https://hono.dev) · [grammy](https://grammy.dev) · [Vite](https://vitejs.dev) · [Tailwind](https://tailwindcss.com) · [technicalindicators](https://github.com/anandanand84/technicalindicators)
