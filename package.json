@@ -8,9 +8,10 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "setup": "tsx scripts/setup.ts",
-    "build:web": "vite build --root web",
-    "dev:web": "vite --root web",
-    "build": "npm run build:web",
+    "build:web": "npm --prefix web run build",
+    "dev:web": "npm --prefix web run dev",
+    "install:web": "npm --prefix web install --legacy-peer-deps",
+    "build": "npm run install:web && npm run build:web",
     "typecheck": "tsc --noEmit",
     "test": "node --test src/**/*.test.ts"
   },
