@@ -72,8 +72,9 @@ consumer.
 
 ## Why three policy layers
 
-The bounty's #1 judging criterion is "no god-mode agents." Three independent
-layers means a failure in one doesn't compromise the others:
+The agent must not be able to bypass safety limits, even if the rebalancer
+code itself is buggy or compromised. Three independent layers means a
+failure in one doesn't compromise the others:
 
 | Layer | Where it runs | What stops it being bypassed |
 |---|---|---|

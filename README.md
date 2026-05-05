@@ -231,9 +231,8 @@ Full details in [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 | Doc | What's in it |
 |---|---|
 | [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | Process layout, data flow, why three policy layers |
-| [docs/POLICY.md](./docs/POLICY.md) | Every policy in detail, demo scenarios proving each one works |
+| [docs/POLICY.md](./docs/POLICY.md) | Every policy in detail, with scenarios proving each one works |
 | [docs/RECOVERY.md](./docs/RECOVERY.md) | Three ways to recover your wallet (mnemonic, file copy, mobile pairing) |
-| [docs/DEMO.md](./docs/DEMO.md) | 4-minute screen-recording script |
 | [.env.example](./.env.example) | Every config variable, with the security model explained inline |
 
 ## Troubleshooting

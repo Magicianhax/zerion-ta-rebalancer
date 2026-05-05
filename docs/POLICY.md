@@ -1,7 +1,10 @@
-# Policy story
+# Policy
 
-The agent token issued by `npm run setup` carries a multi-layer policy. This
-is the safety story for the hackathon's "no god-mode agents" criterion.
+The agent token issued by `npm run setup` carries a multi-layer policy that
+defines exactly what the rebalancer is allowed to do. The agent cannot work
+around any of these limits — they're enforced at the wallet signing layer
+(in OWS) and re-checked in our application code, in three independent
+layers that compose with AND semantics.
 
 ## Layer 1: OWS built-in declarative rules
 
@@ -44,24 +47,26 @@ correctly.
 | Slippage cap | 2% | Bad swaps in thin liquidity |
 | Dust filter | $1 per swap | Pointless gas burn on tiny rebalances |
 
-## Demo scenario for judges
+## Verifying each layer holds
 
-The rebalancer can demonstrate each layer:
+You can confirm every policy layer works by attempting the action it's
+supposed to block. All four of these attempts fail with structured errors:
 
-1. **Show layer 3 working**: try to rebalance immediately after a previous
-   rebalance — guard rejects with "cooldown", logged in the dashboard.
+1. **App-layer cooldown.** Trigger a manual rebalance, then immediately
+   trigger another. The second attempt is rejected with a "cooldown" message
+   — the basket's last rebalance is too recent.
 
-2. **Show layer 2 working**: try to send a raw ETH transfer using the
-   bot's agent token (e.g., via direct CLI: `zerion send eth 0.01 --to <addr>`).
-   The OWS dispatcher invokes `deny-transfers.mjs` and OWS refuses to sign.
+2. **OWS deny-transfers.** Try a raw token transfer with the agent's wallet:
+   `zerion send eth 0.01 --to 0xdeadbeef... --wallet <name>`. The OWS
+   dispatcher invokes `deny-transfers.mjs` and the wallet refuses to sign.
 
-3. **Show layer 1 working**: try to swap on a chain not in the basket
-   (e.g., the basket is Base, try a swap on Arbitrum). OWS refuses
-   based on `allowed_chains`.
+3. **OWS chain-lock.** Try a swap on a chain not in the basket. If the basket
+   is locked to Solana, run `zerion swap base 1 USDC ETH --wallet <name>`.
+   OWS refuses based on `allowed_chains` — the signature never happens.
 
-4. **Show layer 2 anti-churn**: artificially trigger many manual rebalances.
-   After the daily cap (default 8), `spend-cap.mjs` refuses further signs
-   for the next 24h.
+4. **OWS daily transaction cap.** Trigger more rebalances than the daily cap
+   (default 8) within 24 hours. After the cap, `spend-cap.mjs` refuses
+   further signs until the rolling 24h window opens up.
 
-The agent token cannot do anything outside the basket's intent — by
-construction, not by convention.
+Every refusal is structured and logged. The agent cannot do anything outside
+the basket's intent — by construction, not by convention.
