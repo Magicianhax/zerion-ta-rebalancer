@@ -15,7 +15,7 @@ interface Selection {
 export default function NewBasketModal({ onClose, onCreated }: Props) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [name, setName] = useState("");
-  const [chain, setChain] = useState<Chain>("base");
+  const [chain, setChain] = useState<Chain>("solana");
   const [budget, setBudget] = useState(100);
   const [taBias, setTaBias] = useState(0.5);
   const [tokens, setTokens] = useState<TokenEntry[]>([]);
@@ -112,7 +112,7 @@ export default function NewBasketModal({ onClose, onCreated }: Props) {
               <div>
                 <label className="text-sm text-ink-300 block mb-2">Chain</label>
                 <div className="grid grid-cols-2 gap-2">
-                  {(["base", "solana"] as Chain[]).map((c) => (
+                  {(["solana", "base"] as Chain[]).map((c) => (
                     <button
                       key={c}
                       onClick={() => { setChain(c); setSelections([]); }}

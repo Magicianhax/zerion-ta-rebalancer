@@ -4,7 +4,7 @@
 
 ## What it does
 
-1. You define a basket: pick tokens (Base or Solana), set a budget in USDC, set initial weights.
+1. You define a basket: pick tokens (Solana or Base), set a budget in USDC, set initial weights.
 2. Setup wizard creates a Zerion wallet, mints an agent token scoped to your basket, attaches a policy with chain-lock + token allowlist + spend cap.
 3. You fund the wallet. The bot makes the initial swaps to match your weights.
 4. Every hour, the rebalancer:

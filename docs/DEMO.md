@@ -10,8 +10,8 @@ time: ~4 minutes. Practice once before recording.
 - Have an agent token with the setup wizard's default policy attached
 - Web dashboard running at `localhost:3000`
 - Optional: Telegram bot paired
-- Pre-populate one basket with $5-10 budget, 2-3 tokens (e.g., ETH 60%, AERO 40%)
-- Make sure the wallet holds quote token (USDC) so swap plans aren't blocked by lack of funds
+- Pre-populate one basket with $5-10 budget, 2-3 tokens (e.g. on Solana: SOL 50%, BONK 30%, JUP 20%; or on Base: ETH 60%, AERO 40%)
+- Make sure the wallet holds quote token (USDC) on the basket's chain so swap plans aren't blocked by lack of funds
 
 ## 0:00 — Intro (15s)
 
@@ -34,8 +34,8 @@ Show `~/.zerion/config.json` — the agent token and policy id.
 
 Open `localhost:3000`, log in with the password.
 
-> "The basket I prepared earlier holds ETH and AERO on Base, currently
-> sitting at the initial weights I set."
+> "The basket I prepared earlier holds SOL, BONK, and JUP on Solana,
+> currently sitting at the initial weights I set."
 
 Hover the basket card → show current vs target weights.
 
@@ -49,7 +49,8 @@ Click "Rebalance now". Talk through the live event:
 > 50/50 by default."
 
 Show the dashboard updating with the new weights, the swap that fired,
-and the on-chain tx hash. Click the tx hash → opens Basescan.
+and the on-chain tx hash. Click the tx hash → opens Solscan (or Basescan
+for Base baskets).
 
 > "This is a real on-chain transaction routed through the Zerion API."
 
@@ -58,7 +59,7 @@ and the on-chain tx hash. Click the tx hash → opens Basescan.
 In a separate terminal, try to bypass:
 
 ```
-zerion send eth 0.001 --to 0xdeadbeef... --wallet rebalancer
+zerion send SOL 0.01 --to 2Nsnn... --wallet rebalancer
 ```
 
 Show the structured error:
@@ -69,10 +70,10 @@ Show the structured error:
 Try a different chain:
 
 ```
-zerion swap arbitrum 1 USDC ETH --wallet rebalancer
+zerion swap base 1 USDC ETH --wallet rebalancer
 ```
 
-> "Refused — the policy locked this token to Base only."
+> "Refused — the policy locked this token to Solana only."
 
 ## 3:15 — Telegram (30s)
 

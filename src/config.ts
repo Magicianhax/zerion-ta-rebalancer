@@ -14,7 +14,7 @@ const Schema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   TELEGRAM_BOT_TOKEN: z.string().optional().default(""),
   REBALANCE_CRON: z.string().default("0 * * * *"),
-  DEFAULT_CHAIN: z.enum(["base", "solana"]).default("base"),
+  DEFAULT_CHAIN: z.enum(["base", "solana"]).default("solana"),
   DB_PATH: z.string().default("./data/rebalancer.db"),
   MAX_DRIFT_PERCENT: z.coerce.number().min(1).max(100).default(10),
   REBALANCE_COOLDOWN_MINUTES: z.coerce.number().min(0).default(45),
