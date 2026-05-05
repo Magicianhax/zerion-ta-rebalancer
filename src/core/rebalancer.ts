@@ -223,6 +223,14 @@ async function executeSwap(basket: Basket, step: SwapPlan): Promise<any> {
 }
 
 function extractTxHash(result: any): string | undefined {
-  // Zerion CLI swap response shape varies — try common keys
-  return result?.transaction?.hash ?? result?.tx_hash ?? result?.hash ?? undefined;
+  // Zerion CLI swap response shape: { swap: {...}, tx: { hash, status, ... }, executed: true }
+  // Verified by reading cli/commands/trading/swap.js — tx hash lives at result.tx.hash.
+  // Other keys kept as fallbacks for bridge/send commands which may differ.
+  return (
+    result?.tx?.hash ??
+    result?.transaction?.hash ??
+    result?.tx_hash ??
+    result?.hash ??
+    undefined
+  );
 }
