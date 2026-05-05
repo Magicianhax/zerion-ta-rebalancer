@@ -9,7 +9,7 @@
 import cron from "node-cron";
 import { config } from "./config.ts";
 import { listBaskets } from "./core/db.ts";
-import { runHourlyTick } from "./agent/index.ts";
+import { isAgentEnabled, runHourlyTick } from "./agent/index.ts";
 
 export function startCron() {
   if (!cron.validate(config.rebalanceCron)) {
@@ -20,7 +20,7 @@ export function startCron() {
     const baskets = listBaskets().filter((b) => b.enabled);
     if (baskets.length === 0) return;
     process.stdout.write(
-      `[cron] tick — ${baskets.length} basket(s) ${config.agentEnabled ? "(agent on)" : "(deterministic)"}\n`
+      `[cron] tick — ${baskets.length} basket(s) ${isAgentEnabled() ? "(agent on)" : "(deterministic)"}\n`
     );
 
     for (const basket of baskets) {
