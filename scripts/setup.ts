@@ -17,18 +17,46 @@ import { existsSync } from "node:fs";
 import { config } from "../src/config.ts";
 import { initDb } from "../src/core/db.ts";
 
-const rl = createInterface({ input: stdin, output: stdout });
-
+/**
+ * Open readline only for the duration of one prompt, then close it.
+ *
+ * Critical: a persistent readline keeps stdin in line-buffered mode and
+ * fights with the Zerion CLI's setRawMode() when it asks for a passphrase
+ * (manifests as corrupted/duplicated chars in some terminals like VS Code's
+ * WSL integrated terminal). Closing readline between prompts releases stdin
+ * fully so the child process owns it cleanly.
+ */
 async function ask(question: string, fallback?: string): Promise<string> {
-  const suffix = fallback ? ` [${fallback}] ` : " ";
-  const answer = (await rl.question(`${question}${suffix}`)).trim();
-  return answer || fallback || "";
+  const rl = createInterface({ input: stdin, output: stdout });
+  try {
+    const suffix = fallback ? ` [${fallback}] ` : " ";
+    const answer = (await rl.question(`${question}${suffix}`)).trim();
+    return answer || fallback || "";
+  } finally {
+    rl.close();
+  }
 }
 
 async function askYN(question: string, defaultYes = true): Promise<boolean> {
-  const answer = (await rl.question(`${question} ${defaultYes ? "[Y/n]" : "[y/N]"} `)).trim().toLowerCase();
-  if (!answer) return defaultYes;
-  return answer.startsWith("y");
+  const rl = createInterface({ input: stdin, output: stdout });
+  try {
+    const answer = (await rl.question(
+      `${question} ${defaultYes ? "[Y/n]" : "[y/N]"} `,
+    )).trim().toLowerCase();
+    if (!answer) return defaultYes;
+    return answer.startsWith("y");
+  } finally {
+    rl.close();
+  }
+}
+
+async function pressEnter(prompt: string): Promise<void> {
+  const rl = createInterface({ input: stdin, output: stdout });
+  try {
+    await rl.question(prompt);
+  } finally {
+    rl.close();
+  }
 }
 
 interface CliResult {
@@ -228,7 +256,7 @@ async function main() {
       stdout.write(`    zerion wallet backup --wallet ${walletName}\n\n`);
     } else {
       stdout.write("\n⚠  Write the 12 words on paper. Store offline. Do NOT screenshot.\n");
-      await rl.question("Press Enter once you've recorded it... ");
+      await pressEnter("Press Enter once you've recorded it... ");
     }
   } else {
     stdout.write(`\nSkipped. Run later: zerion wallet backup --wallet ${walletName}\n`);
@@ -252,8 +280,6 @@ async function main() {
   stdout.write("  2. npm start      — boot the rebalancer (if not already running)\n");
   stdout.write("  3. Visit http://localhost:" + config.port + " and create your basket\n");
   stdout.write("  4. See docs/RECOVERY.md for restoring the wallet later\n\n");
-
-  rl.close();
 }
 
 main().catch((e) => {
