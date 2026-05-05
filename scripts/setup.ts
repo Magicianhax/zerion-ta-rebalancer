@@ -151,8 +151,23 @@ async function main() {
     process.exit(1);
   }
 
-  // Step 4: deposit instructions
-  stdout.write("\nStep 4 — Fund Your Wallet\n");
+  // Step 4: backup
+  stdout.write("\nStep 4 — Back up the recovery phrase\n");
+  stdout.write("────────────────────────────────────\n");
+  stdout.write("This is the most important step. Without the recovery phrase,\n");
+  stdout.write("you cannot restore the wallet if you lose this machine.\n\n");
+  if (await askYN("Show recovery phrase now?", true)) {
+    stdout.write(`\nRunning: zerion wallet backup --wallet ${walletName}\n`);
+    stdout.write("(Re-enter your passphrase when prompted.)\n\n");
+    await runCli(["wallet", "backup", "--wallet", walletName]);
+    stdout.write("\n⚠  Write it down on paper. Store offline. Do NOT screenshot.\n");
+    await rl.question("Press Enter once you've recorded it... ");
+  } else {
+    stdout.write(`\nSkipped. Run later: zerion wallet backup --wallet ${walletName}\n`);
+  }
+
+  // Step 5: deposit instructions
+  stdout.write("\nStep 5 — Fund Your Wallet\n");
   stdout.write("─────────────────────────\n");
   stdout.write("Run this to see the deposit address:\n\n");
   stdout.write(`    zerion wallet fund --wallet ${walletName}\n\n`);
@@ -168,7 +183,8 @@ async function main() {
   stdout.write("  1. Fund the wallet (see above)\n");
   stdout.write("  2. npm run build  — build the web dashboard\n");
   stdout.write("  3. npm start      — boot the rebalancer\n");
-  stdout.write("  4. Visit http://localhost:" + config.port + " and create your basket\n\n");
+  stdout.write("  4. Visit http://localhost:" + config.port + " and create your basket\n");
+  stdout.write("  5. See docs/RECOVERY.md for restoring the wallet later\n\n");
 
   rl.close();
 }
