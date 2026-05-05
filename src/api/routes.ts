@@ -18,6 +18,7 @@ import {
 import { events, rebalance } from "../core/rebalancer.ts";
 import { listTokens } from "../core/token-registry.ts";
 import { listAgentTokens, listPolicies, positions, walletList } from "../core/zerion.ts";
+import { summarizePositions } from "../core/positions-parser.ts";
 import type { Basket, Chain } from "../types.ts";
 import { config } from "../config.ts";
 
@@ -144,28 +145,17 @@ api.get("/baskets/:id/portfolio", async (c) => {
   if (!basket) return c.json({ error: { code: "not_found" } }, 404);
   try {
     const raw = await positions(basket.walletName, "simple");
-    const items: any[] = raw?.positions ?? raw?.data ?? [];
-    const want = new Set(basket.tokens.map((t) => t.symbol.toUpperCase()));
-    want.add(basket.quoteToken.toUpperCase());
-    const byToken: Record<string, number> = {};
-    let total = 0;
-    for (const item of items) {
-      const sym = (item.symbol ?? item.fungible?.symbol ?? "").toUpperCase();
-      if (!want.has(sym)) continue;
-      const value = Number(item.value_usd ?? item.value ?? item.usd_value ?? 0);
-      if (!Number.isFinite(value) || value <= 0) continue;
-      byToken[sym] = (byToken[sym] ?? 0) + value;
-      total += value;
-    }
+    const summary = summarizePositions(raw, basket);
     const weights: Record<string, number> = {};
-    for (const [sym, usd] of Object.entries(byToken)) {
-      weights[sym] = total > 0 ? usd / total : 0;
+    for (const [sym, usd] of Object.entries(summary.byToken)) {
+      weights[sym] = summary.totalUsd > 0 ? usd / summary.totalUsd : 0;
     }
     return c.json({
       portfolio: {
-        totalUsd: Math.round(total * 100) / 100,
-        byToken,
+        totalUsd: Math.round(summary.totalUsd * 100) / 100,
+        byToken: summary.byToken,
         currentWeights: weights,
+        rawSymbolsSeen: summary.rawSymbols.slice(0, 20),
         fetchedAt: new Date().toISOString(),
       },
     });

@@ -20,36 +20,31 @@ import {
 } from "../core/db.ts";
 import { events } from "../core/rebalancer.ts";
 import { positions } from "../core/zerion.ts";
+import { summarizePositions } from "../core/positions-parser.ts";
 import { handleChatMessage, resetConversation } from "../agent/index.ts";
 import type { Basket, RebalanceResult } from "../types.ts";
 
 async function fetchBalance(basket: Basket): Promise<string> {
   try {
     const raw = await positions(basket.walletName, "simple");
-    const items: any[] = raw?.positions ?? raw?.data ?? [];
-    const want = new Set(basket.tokens.map((t) => t.symbol.toUpperCase()));
-    want.add(basket.quoteToken.toUpperCase());
-    const byToken: Record<string, number> = {};
-    let total = 0;
-    for (const item of items) {
-      const sym = (item.symbol ?? item.fungible?.symbol ?? "").toUpperCase();
-      if (!want.has(sym)) continue;
-      const value = Number(item.value_usd ?? item.value ?? item.usd_value ?? 0);
-      if (!Number.isFinite(value) || value <= 0) continue;
-      byToken[sym] = (byToken[sym] ?? 0) + value;
-      total += value;
-    }
-    if (total === 0) {
-      return `*${basket.name}* (${basket.chain}) — wallet \`${basket.walletName}\` is empty. Fund it with USDC + gas to start.`;
+    const { totalUsd, byToken, rawSymbols } = summarizePositions(raw, basket);
+    if (totalUsd === 0) {
+      const seen = rawSymbols.length
+        ? `\nZerion sees: ${[...new Set(rawSymbols)].slice(0, 8).join(", ")}`
+        : "";
+      return (
+        `*${basket.name}* (${basket.chain}) — wallet \`${basket.walletName}\` shows $0.\n` +
+        `Fund it with USDC + gas to start (or wait ~60s for Zerion to index a fresh deposit).${seen}`
+      );
     }
     const tokenLines = Object.entries(byToken)
       .sort((a, b) => b[1] - a[1])
       .map(
         ([sym, usd]) =>
-          `  ${sym.padEnd(6)} $${usd.toFixed(2).padStart(7)} (${((usd / total) * 100).toFixed(1)}%)`,
+          `  ${sym.padEnd(6)} $${usd.toFixed(2).padStart(7)} (${((usd / totalUsd) * 100).toFixed(1)}%)`,
       )
       .join("\n");
-    return `*${basket.name}* (${basket.chain}) — *$${total.toFixed(2)}* total\n\`\`\`\n${tokenLines}\n\`\`\``;
+    return `*${basket.name}* (${basket.chain}) — *$${totalUsd.toFixed(2)}* total\n\`\`\`\n${tokenLines}\n\`\`\``;
   } catch (e: any) {
     return `*${basket.name}* — error fetching balance: ${e.message}`;
   }

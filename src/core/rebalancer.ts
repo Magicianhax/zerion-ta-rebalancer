@@ -18,6 +18,7 @@ import { blendWeights, scoresToWeights, scoreToken } from "./ta.ts";
 import { evaluateGuards } from "./policy.ts";
 import { lastRebalanceFor, recordRebalance, getBasket } from "./db.ts";
 import { positions, swap, swapSolana, type SwapArgs } from "./zerion.ts";
+import { summarizePositions as summarizePositionsCore } from "./positions-parser.ts";
 import { config } from "../config.ts";
 import type {
   Basket,
@@ -42,23 +43,17 @@ interface PortfolioSnapshot {
  * positions on the basket's chain only.
  */
 function summarizePositions(raw: any, basket: Basket): PortfolioSnapshot {
-  const byToken: Record<string, number> = {};
-  let totalUsd = 0;
-
-  const items: any[] = raw?.positions ?? raw?.data ?? [];
-  const wantSymbols = new Set(basket.tokens.map((t) => t.symbol.toUpperCase()));
-  wantSymbols.add(basket.quoteToken.toUpperCase());
-
-  for (const item of items) {
-    const symbol = (item.symbol ?? item.fungible?.symbol ?? "").toUpperCase();
-    if (!wantSymbols.has(symbol)) continue;
-    const valueUsd = Number(item.value_usd ?? item.value ?? item.usd_value ?? 0);
-    if (!Number.isFinite(valueUsd) || valueUsd <= 0) continue;
-    byToken[symbol] = (byToken[symbol] ?? 0) + valueUsd;
-    totalUsd += valueUsd;
+  const result = summarizePositionsCore(raw, basket);
+  if (result.rawSymbols.length > 0 && Object.keys(result.byToken).length === 0) {
+    const wanted = basket.tokens.map((t) => t.symbol.toUpperCase());
+    wanted.push(basket.quoteToken.toUpperCase());
+    process.stderr.write(
+      `[rebalancer] positions returned ${result.rawSymbols.length} item(s) but none matched basket "${basket.name}".\n` +
+      `  Wanted:  ${[...new Set(wanted)].sort().join(", ")}\n` +
+      `  Got:     ${[...new Set(result.rawSymbols)].sort().slice(0, 15).join(", ")}\n`,
+    );
   }
-
-  return { totalUsd, byToken };
+  return { totalUsd: result.totalUsd, byToken: result.byToken };
 }
 
 function computeCurrentWeights(snapshot: PortfolioSnapshot): Record<string, number> {
