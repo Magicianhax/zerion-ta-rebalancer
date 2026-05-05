@@ -19,6 +19,9 @@ const Schema = z.object({
   MAX_DRIFT_PERCENT: z.coerce.number().min(1).max(100).default(10),
   REBALANCE_COOLDOWN_MINUTES: z.coerce.number().min(0).default(45),
   DEFAULT_SLIPPAGE: z.coerce.number().min(0).max(10).default(2),
+  ANTHROPIC_API_KEY: z.string().optional().default(""),
+  ANTHROPIC_MODEL: z.string().default("claude-sonnet-4-6"),
+  AGENT_EFFORT: z.enum(["low", "medium", "high", "xhigh", "max"]).default("medium"),
 });
 
 const parsed = Schema.safeParse(process.env);
@@ -47,6 +50,10 @@ export const config = Object.freeze({
   maxDriftPercent: env.MAX_DRIFT_PERCENT,
   cooldownMinutes: env.REBALANCE_COOLDOWN_MINUTES,
   defaultSlippage: env.DEFAULT_SLIPPAGE,
+  anthropicApiKey: env.ANTHROPIC_API_KEY,
+  anthropicModel: env.ANTHROPIC_MODEL,
+  agentEffort: env.AGENT_EFFORT,
+  agentEnabled: env.ANTHROPIC_API_KEY.length > 0,
 });
 
 export type Config = typeof config;

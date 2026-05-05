@@ -54,6 +54,11 @@ const SCHEMA_STATEMENTS: string[] = [
      paired_at TEXT,
      expires_at TEXT NOT NULL
    )`,
+  `CREATE TABLE IF NOT EXISTS conversations (
+     chat_id TEXT PRIMARY KEY,
+     messages TEXT NOT NULL,
+     updated_at TEXT NOT NULL
+   )`,
 ];
 
 export function initDb(): Database.Database {
@@ -218,4 +223,34 @@ export function getPairedChatIds(): string[] {
     .prepare(`SELECT chat_id FROM telegram_pairings WHERE chat_id IS NOT NULL`)
     .all() as Array<{ chat_id: string }>;
   return rows.map((r) => r.chat_id);
+}
+
+// ── Conversations (Telegram chat history per chat_id) ────────────────
+
+export function loadConversation(chatId: string): unknown[] {
+  const row = getDb()
+    .prepare(`SELECT messages FROM conversations WHERE chat_id = ?`)
+    .get(chatId) as { messages: string } | undefined;
+  if (!row) return [];
+  try {
+    return JSON.parse(row.messages) as unknown[];
+  } catch {
+    return [];
+  }
+}
+
+export function saveConversation(chatId: string, messages: unknown[]): void {
+  getDb()
+    .prepare(
+      `INSERT INTO conversations (chat_id, messages, updated_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(chat_id) DO UPDATE SET
+         messages = excluded.messages,
+         updated_at = excluded.updated_at`
+    )
+    .run(chatId, JSON.stringify(messages), new Date().toISOString());
+}
+
+export function clearConversation(chatId: string): void {
+  getDb().prepare(`DELETE FROM conversations WHERE chat_id = ?`).run(chatId);
 }

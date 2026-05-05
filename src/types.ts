@@ -81,6 +81,10 @@ export interface RebalanceResult {
     txHash?: string;
     error?: string;
   }>;
+  /** Plain-English reasoning from the Claude agent (when ANTHROPIC_API_KEY is set) */
+  reasoning?: string;
+  /** Source of this rebalance: "cron" | "manual" | "agent" */
+  source?: "cron" | "manual" | "agent";
   startedAt: string;
   finishedAt: string;
 }

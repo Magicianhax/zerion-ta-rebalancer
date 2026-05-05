@@ -11,8 +11,15 @@
 
 import { Bot } from "grammy";
 import { config } from "../config.ts";
-import { consumePairing, getBasket, listBaskets, getPairedChatIds } from "../core/db.ts";
+import {
+  consumePairing,
+  getBasket,
+  listBaskets,
+  getPairedChatIds,
+  setBasketEnabled,
+} from "../core/db.ts";
 import { events } from "../core/rebalancer.ts";
+import { handleChatMessage, resetConversation } from "../agent/index.ts";
 import type { RebalanceResult } from "../types.ts";
 
 function formatRebalance(r: RebalanceResult): string {
@@ -63,6 +70,37 @@ export async function startBot() {
   });
 
   bot.command("ping", (ctx) => ctx.reply("pong"));
+
+  bot.command("reset", async (ctx) => {
+    resetConversation(String(ctx.chat.id));
+    return ctx.reply("Conversation history cleared. Fresh start.");
+  });
+
+  bot.command(["pause", "resume"], async (ctx) => {
+    const targetName = ctx.match?.trim();
+    if (!targetName) return ctx.reply(`Usage: /${ctx.message?.text?.startsWith("/pause") ? "pause" : "resume"} <basket name or id>`);
+    const baskets = listBaskets();
+    const target = baskets.find((b) => b.id === targetName || b.name === targetName);
+    if (!target) return ctx.reply(`No basket named "${targetName}". Try /status to see what's available.`);
+    const wantEnabled = ctx.message?.text?.startsWith("/resume") ?? false;
+    setBasketEnabled(target.id, wantEnabled);
+    return ctx.reply(`${target.name} → ${wantEnabled ? "resumed" : "paused"}.`);
+  });
+
+  // Plain-text messages (non-commands) → route to the Claude agent.
+  // Long-running tool calls can take 10-30s, so show typing indicator.
+  bot.on("message:text", async (ctx) => {
+    if (ctx.message.text.startsWith("/")) return;
+    const chatId = String(ctx.chat.id);
+    try {
+      await ctx.api.sendChatAction(ctx.chat.id, "typing");
+      const reply = await handleChatMessage(chatId, ctx.message.text);
+      await ctx.reply(reply, { parse_mode: "Markdown" });
+    } catch (e: any) {
+      process.stderr.write(`bot text handler error: ${e.message}\n`);
+      await ctx.reply(`Hit an error: ${e.message}`);
+    }
+  });
 
   events.on("rebalance:done", async (result: RebalanceResult) => {
     const chats = getPairedChatIds();
