@@ -53,22 +53,44 @@ async function fetchBalance(basket: Basket): Promise<string> {
   }
 }
 
+/** Escape characters that Telegram's Markdown parser treats as formatting. */
+function escapeMd(text: string): string {
+  return String(text).replace(/[_*`\[\]()~>#+\-=|{}.!\\]/g, "\\$&");
+}
+
+/** Pull the human-readable error out of a CLI stderr blob. */
+function summarizeError(raw: string): string {
+  try {
+    const match = raw.match(/\{[\s\S]*\}\s*$/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      if (parsed?.error?.message) return String(parsed.error.message);
+    }
+  } catch {
+    // fall through
+  }
+  const firstLine = raw.split("\n").find((l) => l.trim() && !l.includes("DeprecationWarning"));
+  return (firstLine ?? raw).slice(0, 200);
+}
+
 function formatRebalance(r: RebalanceResult): string {
   const basket = getBasket(r.basketId);
-  const head = `*${basket?.name ?? r.basketId}* — ${new Date(r.startedAt).toLocaleString()}`;
+  const head = `*${escapeMd(basket?.name ?? r.basketId)}* — ${escapeMd(new Date(r.startedAt).toLocaleString())}`;
 
   if (!r.guardOutcome.allow) {
-    return `${head}\nDenied: ${r.guardOutcome.reason}`;
+    return `${head}\nDenied: ${escapeMd(r.guardOutcome.reason)}`;
   }
 
   if (r.swaps.length === 0) {
-    return `${head}\nNo action needed (within tolerance).`;
+    return `${head}\nNo action needed \\(within tolerance\\)\\.`;
   }
 
   const lines = r.swaps.map((s) => {
-    const arrow = `${s.plan.fromToken} → ${s.plan.toToken}`;
-    if (s.error) return `❌ ${arrow}: ${s.error}`;
-    return `✅ ${arrow}: $${s.plan.estimatedUsd.toFixed(2)}${s.txHash ? ` · \`${s.txHash.slice(0, 10)}…\`` : ""}`;
+    const arrow = `${escapeMd(s.plan.fromToken)} → ${escapeMd(s.plan.toToken)}`;
+    if (s.error) return `❌ ${arrow}: ${escapeMd(summarizeError(s.error))}`;
+    const usd = `$${s.plan.estimatedUsd.toFixed(2)}`;
+    const hash = s.txHash ? ` · \`${s.txHash.slice(0, 10)}…\`` : "";
+    return `✅ ${arrow}: ${escapeMd(usd)}${hash}`;
   });
   return `${head}\n${lines.join("\n")}`;
 }
