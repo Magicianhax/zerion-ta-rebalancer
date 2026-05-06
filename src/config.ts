@@ -13,6 +13,7 @@ const Schema = z.object({
   ZERION_CLI_PATH: z.string().default("../zerion-ai/cli/zerion.js"),
   PORT: z.coerce.number().int().positive().default(3000),
   TELEGRAM_BOT_TOKEN: z.string().optional().default(""),
+  TELEGRAM_AUTHORIZED_USER_IDS: z.string().optional().default(""),
   REBALANCE_CRON: z.string().default("0 * * * *"),
   DEFAULT_CHAIN: z.enum(["base", "solana"]).default("solana"),
   DB_PATH: z.string().default("./data/rebalancer.db"),
@@ -44,6 +45,10 @@ export const config = Object.freeze({
   zerionCliPath: resolve(env.ZERION_CLI_PATH),
   port: env.PORT,
   telegramBotToken: env.TELEGRAM_BOT_TOKEN,
+  telegramAuthorizedUserIds: env.TELEGRAM_AUTHORIZED_USER_IDS
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => /^-?\d+$/.test(s)),
   rebalanceCron: env.REBALANCE_CRON,
   defaultChain: env.DEFAULT_CHAIN,
   dbPath: resolve(env.DB_PATH),

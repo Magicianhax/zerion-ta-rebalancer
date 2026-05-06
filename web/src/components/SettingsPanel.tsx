@@ -1,19 +1,14 @@
 import { useEffect, useState } from "react";
-import { X, Send, Copy, Check, UserPlus, Trash2, ExternalLink } from "lucide-react";
+import { X, Send, Copy, Check, ExternalLink, Lock } from "lucide-react";
 import { api } from "../api.ts";
 
 export default function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-
-  // Authorized users
-  const [authorized, setAuthorized] = useState<string[]>([]);
-  const [newUserId, setNewUserId] = useState("");
-  const [savingAuth, setSavingAuth] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null);
+  const [authorized, setAuthorized] = useState<string[] | null>(null);
 
   useEffect(() => {
-    api.getAuthorizedTelegramUsers().then((r) => setAuthorized(r.userIds)).catch(() => {});
+    api.getAuthorizedTelegramUsers().then((r) => setAuthorized(r.userIds)).catch(() => setAuthorized([]));
   }, []);
 
   const generate = async () => {
@@ -28,39 +23,6 @@ export default function SettingsPanel({ onClose }: { onClose: () => void }) {
     setTimeout(() => setCopied(false), 1500);
   };
 
-  const addUser = async () => {
-    setAuthError(null);
-    const trimmed = newUserId.trim();
-    if (!/^-?\d+$/.test(trimmed)) {
-      setAuthError("Telegram user IDs are numeric (e.g. 5800688332).");
-      return;
-    }
-    if (authorized.includes(trimmed)) {
-      setAuthError("Already authorized.");
-      return;
-    }
-    setSavingAuth(true);
-    try {
-      const r = await api.setAuthorizedTelegramUsers([...authorized, trimmed]);
-      setAuthorized(r.userIds);
-      setNewUserId("");
-    } catch (e: any) {
-      setAuthError(e.message ?? "Failed to save");
-    } finally {
-      setSavingAuth(false);
-    }
-  };
-
-  const removeUser = async (id: string) => {
-    setSavingAuth(true);
-    try {
-      const r = await api.setAuthorizedTelegramUsers(authorized.filter((u) => u !== id));
-      setAuthorized(r.userIds);
-    } finally {
-      setSavingAuth(false);
-    }
-  };
-
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-20" onClick={onClose}>
       <div className="bg-ink-800 border border-ink-700 rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
@@ -70,79 +32,58 @@ export default function SettingsPanel({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="p-6 space-y-6">
-          {/* Authorized Telegram users */}
+          {/* Authorized Telegram users — env-driven, read-only */}
           <div>
             <h3 className="text-sm font-medium flex items-center gap-2 mb-2">
               <Send className="w-4 h-4 text-accent" /> Authorized Telegram users
             </h3>
-            <p className="text-xs text-ink-400 mb-3 leading-relaxed">
-              The bot only responds to whitelisted Telegram user IDs. Find yours by messaging{" "}
-              <a
-                href="https://t.me/userinfobot"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-accent hover:underline inline-flex items-center gap-1"
-              >
-                @userinfobot
-                <ExternalLink className="w-3 h-3" />
-              </a>
-              .
+            <p className="text-xs text-ink-400 mb-3 leading-relaxed flex items-start gap-2">
+              <Lock className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              <span>
+                Configured via <code className="text-ink-200">TELEGRAM_AUTHORIZED_USER_IDS</code> in
+                your <code className="text-ink-200">.env</code>. Edit the file and restart the server
+                to change. Find your user ID by messaging{" "}
+                <a
+                  href="https://t.me/userinfobot"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-accent hover:underline inline-flex items-center gap-1"
+                >
+                  @userinfobot
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+                .
+              </span>
             </p>
 
-            <div className="space-y-2 mb-3">
-              {authorized.length === 0 ? (
-                <div className="text-xs text-amber-400 bg-amber-900/10 border border-amber-900/30 rounded-lg px-3 py-2">
-                  Empty whitelist — bot is ignoring everyone. Add at least one user ID below.
-                </div>
-              ) : (
-                authorized.map((id) => (
-                  <div key={id} className="flex items-center justify-between text-sm bg-ink-900/40 border border-ink-700 rounded-lg px-3 py-2">
-                    <code className="font-mono text-ink-200">{id}</code>
-                    <button
-                      onClick={() => removeUser(id)}
-                      disabled={savingAuth}
-                      className="p-1 hover:bg-red-900/40 hover:text-red-300 rounded disabled:opacity-50"
-                      title="Remove"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+            {authorized === null ? (
+              <div className="text-xs text-ink-400">Loading…</div>
+            ) : authorized.length === 0 ? (
+              <div className="text-xs text-amber-400 bg-amber-900/10 border border-amber-900/30 rounded-lg px-3 py-2">
+                Empty whitelist — bot is ignoring everyone. Add IDs to{" "}
+                <code className="text-ink-200">TELEGRAM_AUTHORIZED_USER_IDS</code> in <code className="text-ink-200">.env</code>.
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                {authorized.map((id) => (
+                  <div key={id} className="text-xs bg-ink-900/40 border border-ink-700 rounded-lg px-3 py-2 font-mono text-ink-200">
+                    {id}
                   </div>
-                ))
-              )}
-            </div>
-
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                inputMode="numeric"
-                value={newUserId}
-                onChange={(e) => setNewUserId(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && addUser()}
-                placeholder="e.g. 5800688332"
-                className="flex-1 bg-ink-700 border border-ink-600 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-accent"
-              />
-              <button
-                onClick={addUser}
-                disabled={savingAuth || !newUserId.trim()}
-                className="bg-accent hover:bg-accent-dim disabled:opacity-50 text-white text-sm font-medium rounded-lg px-3 py-2 flex items-center gap-1.5"
-              >
-                <UserPlus className="w-3.5 h-3.5" /> Add
-              </button>
-            </div>
-            {authError && <div className="text-xs text-red-400 mt-2">{authError}</div>}
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="border-t border-ink-700" />
 
-          {/* Pairing code (legacy / fallback) */}
+          {/* Pairing code — runtime ad-hoc tool, kept */}
           <div>
             <h3 className="text-sm font-medium flex items-center gap-2 mb-2">
               <Send className="w-4 h-4 text-ink-400" /> One-time pairing code
             </h3>
             <p className="text-xs text-ink-400 mb-3">
-              Optional. For ad-hoc setup when you can't reach the user-ID whitelist.
-              Generate, send <code className="text-ink-200">/start &lt;code&gt;</code> to the bot,
-              and that chat is registered without needing a whitelist entry.
+              Optional. Generates a short-lived code so a non-whitelisted chat can register
+              for notifications without an .env edit. Send <code className="text-ink-200">/start &lt;code&gt;</code> to the bot from that chat.
             </p>
             {!pairingCode ? (
               <button

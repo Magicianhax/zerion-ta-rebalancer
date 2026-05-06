@@ -10,11 +10,9 @@ import {
   createBasket as dbCreateBasket,
   createPairing,
   deleteBasket,
-  getAuthorizedUserIds,
   getBasket,
   listBaskets,
   listRebalances,
-  setAuthorizedUserIds,
   setBasketEnabled,
 } from "../core/db.ts";
 import { events, rebalance } from "../core/rebalancer.ts";
@@ -263,17 +261,8 @@ api.post("/telegram/pair", (c) => {
 });
 
 api.get("/telegram/authorized", (c) => {
-  return c.json({ userIds: getAuthorizedUserIds() });
-});
-
-api.post("/telegram/authorized", async (c) => {
-  const body = await c.req.json().catch(() => null);
-  const parsed = z.object({ userIds: z.array(z.string()) }).safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: { code: "invalid_payload", issues: parsed.error.issues } }, 400);
-  }
-  setAuthorizedUserIds(parsed.data.userIds);
-  return c.json({ userIds: getAuthorizedUserIds() });
+  // Read-only — source of truth is TELEGRAM_AUTHORIZED_USER_IDS in .env.
+  return c.json({ userIds: config.telegramAuthorizedUserIds });
 });
 
 // ── SSE stream ───────────────────────────────────────────────────────

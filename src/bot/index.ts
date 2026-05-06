@@ -16,10 +16,15 @@ import {
   getBasket,
   listBaskets,
   getPairedChatIds,
-  isAuthorizedUserId,
   recordAuthorizedChat,
   setBasketEnabled,
 } from "../core/db.ts";
+
+/** Single source of truth for the bot's auth — TELEGRAM_AUTHORIZED_USER_IDS in .env. */
+function isAuthorizedUserId(userId: string | number): boolean {
+  if (config.telegramAuthorizedUserIds.length === 0) return false;
+  return config.telegramAuthorizedUserIds.includes(String(userId));
+}
 import { events } from "../core/rebalancer.ts";
 import { positions } from "../core/zerion.ts";
 import { summarizePositions } from "../core/positions-parser.ts";
