@@ -225,6 +225,54 @@ export function getPairedChatIds(): string[] {
   return rows.map((r) => r.chat_id);
 }
 
+/**
+ * Whitelist of Telegram user IDs allowed to interact with the bot.
+ *
+ * Telegram user IDs are persistent numeric identifiers per human (find yours
+ * by messaging @userinfobot). They survive username changes and are the
+ * stable primitive for authorization. The whitelist is set during setup and
+ * editable from the web Settings panel.
+ *
+ * Empty whitelist = lockdown: bot ignores every message until at least one
+ * user is added.
+ */
+export function getAuthorizedUserIds(): string[] {
+  const raw = getSetting("telegram_authorized_user_ids");
+  if (!raw) return [];
+  return raw.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+export function setAuthorizedUserIds(ids: string[]): void {
+  const cleaned = ids
+    .map((s) => String(s).trim())
+    .filter((s) => /^-?\d+$/.test(s));
+  setSetting("telegram_authorized_user_ids", [...new Set(cleaned)].join(","));
+}
+
+export function isAuthorizedUserId(userId: string | number): boolean {
+  const ids = getAuthorizedUserIds();
+  if (ids.length === 0) return false;
+  return ids.includes(String(userId));
+}
+
+/**
+ * Register a chat as a known recipient for push notifications. Called when
+ * an authorized user runs /start — reuses the existing telegram_pairings
+ * table so we don't introduce a new schema for the same purpose. The
+ * pairing_code column gets a synthetic value to satisfy uniqueness.
+ */
+export function recordAuthorizedChat(chatId: string, userId: string): void {
+  const code = `auto-${userId}-${chatId}`;
+  const now = new Date().toISOString();
+  getDb()
+    .prepare(
+      `INSERT INTO telegram_pairings (pairing_code, chat_id, paired_at, expires_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(pairing_code) DO NOTHING`,
+    )
+    .run(code, chatId, now, "9999-12-31T23:59:59.999Z");
+}
+
 // ── Conversations (Telegram chat history per chat_id) ────────────────
 
 export function loadConversation(chatId: string): unknown[] {

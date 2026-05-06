@@ -76,6 +76,13 @@ export const api = {
   listPolicies: () => request<{ policies: any[] }>("/agent/policies"),
   listAgentTokens: () => request<{ tokens: any[] }>("/agent/tokens"),
   pairTelegram: () => request<{ pairingCode: string; expiresIn: string }>("/telegram/pair", { method: "POST" }),
+  getAuthorizedTelegramUsers: () =>
+    request<{ userIds: string[] }>("/telegram/authorized"),
+  setAuthorizedTelegramUsers: (userIds: string[]) =>
+    request<{ userIds: string[] }>("/telegram/authorized", {
+      method: "POST",
+      body: JSON.stringify({ userIds }),
+    }),
 };
 
 export function subscribeEvents(

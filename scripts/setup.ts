@@ -15,7 +15,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin, stdout, stderr } from "node:process";
 import { existsSync } from "node:fs";
 import { config } from "../src/config.ts";
-import { initDb } from "../src/core/db.ts";
+import { initDb, getAuthorizedUserIds, setAuthorizedUserIds } from "../src/core/db.ts";
 import { syncZerionConfig } from "../src/core/zerion-config-sync.ts";
 
 /**
@@ -268,8 +268,48 @@ async function main() {
     stdout.write(`\nSkipped. Run later: zerion wallet backup --wallet ${walletName}\n`);
   }
 
-  // ── Step 5: deposit instructions ───────────────────────────────────
-  stdout.write("\nStep 5 — Fund Your Wallet\n");
+  // ── Step 5: Telegram authorization ─────────────────────────────────
+  if (config.telegramBotToken) {
+    stdout.write("\nStep 5 — Telegram authorization\n");
+    stdout.write("───────────────────────────────\n");
+    stdout.write("The bot will only respond to whitelisted Telegram user IDs.\n");
+    stdout.write("To find your user ID:\n");
+    stdout.write("  1. Open Telegram\n");
+    stdout.write("  2. Message @userinfobot — it replies with your numeric user ID\n");
+    stdout.write("     (looks like 5800688332, not @username)\n\n");
+
+    const existing = getAuthorizedUserIds();
+    if (existing.length > 0) {
+      stdout.write(`Currently authorized: ${existing.join(", ")}\n\n`);
+    }
+
+    if (await askYN("Add a Telegram user ID now?", existing.length === 0)) {
+      const raw = await ask("Telegram user ID(s) (comma-separated for multiple)");
+      const candidates = raw.split(",").map((s) => s.trim()).filter(Boolean);
+      const valid = candidates.filter((s) => /^-?\d+$/.test(s));
+      const invalid = candidates.filter((s) => !/^-?\d+$/.test(s));
+      if (invalid.length > 0) {
+        stdout.write(`⚠ Skipped non-numeric entries: ${invalid.join(", ")}\n`);
+      }
+      if (valid.length > 0) {
+        const merged = [...new Set([...existing, ...valid])];
+        setAuthorizedUserIds(merged);
+        stdout.write(`✅ Authorized: ${merged.join(", ")}\n`);
+      } else {
+        stdout.write("No valid IDs added.\n");
+      }
+    } else {
+      stdout.write("Skipped. Edit later via the web dashboard's Settings panel.\n");
+    }
+  } else {
+    stdout.write("\nStep 5 — Telegram\n");
+    stdout.write("─────────────────\n");
+    stdout.write("Skipped (no TELEGRAM_BOT_TOKEN in .env). Set one and re-run setup\n");
+    stdout.write("if you want bot notifications + chat.\n");
+  }
+
+  // ── Step 6: deposit instructions ───────────────────────────────────
+  stdout.write("\nStep 6 — Fund Your Wallet\n");
   stdout.write("─────────────────────────\n");
   stdout.write("Run this to see the deposit address:\n\n");
   stdout.write(`    zerion wallet fund --wallet ${walletName}\n\n`);

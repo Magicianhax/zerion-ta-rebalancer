@@ -16,6 +16,8 @@ import {
   getBasket,
   listBaskets,
   getPairedChatIds,
+  isAuthorizedUserId,
+  recordAuthorizedChat,
   setBasketEnabled,
 } from "../core/db.ts";
 import { events } from "../core/rebalancer.ts";
@@ -98,18 +100,61 @@ function formatRebalance(r: RebalanceResult): string {
 export async function startBot() {
   const bot = new Bot(config.telegramBotToken);
 
+  // Auth middleware — every interaction must come from a whitelisted Telegram
+  // user ID. The whitelist is set during `npm run setup` and editable from
+  // the web Settings panel. Unknown users get a polite refusal and the
+  // server logs the attempted user ID so the operator can decide whether to
+  // whitelist them. The legacy /start <pairing-code> path is kept as a
+  // fallback for first-time bootstrapping when no IDs have been set yet.
+  bot.use(async (ctx, next) => {
+    const userId = ctx.from?.id;
+    if (userId == null) return; // Service messages, ignore.
+
+    if (isAuthorizedUserId(userId)) {
+      // Authorized — also persist this chat so push notifications can reach it.
+      if (ctx.chat?.id != null) {
+        recordAuthorizedChat(String(ctx.chat.id), String(userId));
+      }
+      await next();
+      return;
+    }
+
+    // Unauthorized: allow only `/start <pairing-code>` for bootstrapping.
+    const text = (ctx.message?.text ?? "").trim();
+    const isPairing = text.startsWith("/start ") && text.length > 7;
+    if (isPairing) {
+      await next();
+      return;
+    }
+
+    process.stderr.write(
+      `[bot] unauthorized message from user ${userId} (@${ctx.from?.username ?? "?"}): ${text.slice(0, 60)}\n`,
+    );
+    await ctx.reply(
+      `Not authorized. Your Telegram user ID is \`${userId}\` — ask the operator to add it to the whitelist (Settings → Authorized users in the dashboard, or via the setup wizard).`,
+      { parse_mode: "Markdown" },
+    );
+  });
+
   bot.command("start", async (ctx) => {
     const code = ctx.match?.trim();
-    if (!code) {
-      return ctx.reply(
-        "Welcome! To pair this chat with your Rebalancer dashboard, generate a pairing code there and send it as `/start <code>`."
-      );
+    const userId = ctx.from?.id ? String(ctx.from.id) : null;
+
+    if (code) {
+      const ok = consumePairing(code, String(ctx.chat.id));
+      if (ok) {
+        return ctx.reply("✅ Paired via code. You'll receive rebalance notifications here.");
+      }
+      return ctx.reply("Invalid or expired pairing code. Generate a fresh one in the dashboard.");
     }
-    const ok = consumePairing(code, String(ctx.chat.id));
-    if (ok) {
-      return ctx.reply("✅ Paired. You'll receive rebalance notifications here.");
-    }
-    return ctx.reply("Invalid or expired pairing code. Generate a fresh one in the dashboard.");
+
+    return ctx.reply(
+      `Welcome${ctx.from?.first_name ? `, ${ctx.from.first_name}` : ""}! ` +
+      `Your chat is now paired and you'll get rebalance notifications here.\n\n` +
+      `Send \`/status\`, \`/balance\`, or just chat in plain English to talk to the agent.\n\n` +
+      `Your user ID: \`${userId ?? "?"}\``,
+      { parse_mode: "Markdown" },
+    );
   });
 
   bot.command("status", async (ctx) => {
