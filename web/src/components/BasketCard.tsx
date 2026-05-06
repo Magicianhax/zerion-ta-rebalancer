@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Pause, Play, RefreshCw, Trash2, ChevronDown, ChevronUp, Wallet } from "lucide-react";
 import { api, type Basket, type Portfolio, type RebalanceResult } from "../api.ts";
+import { fmtUsd, fmtRelative } from "../utils/format.ts";
 
 export default function BasketCard({ basket, onChange }: { basket: Basket; onChange: () => void }) {
   const [history, setHistory] = useState<RebalanceResult[] | null>(null);
@@ -51,28 +52,35 @@ export default function BasketCard({ basket, onChange }: { basket: Basket; onCha
   };
 
   return (
-    <div className="bg-ink-800 border border-ink-700 rounded-xl overflow-hidden">
+    <div className="bg-ink-800 border border-ink-700 rounded-xl overflow-hidden hover:border-ink-600 transition">
       <div className="p-5">
-        <div className="flex items-start justify-between mb-3">
-          <div>
-            <h3 className="font-semibold text-base">{basket.name}</h3>
-            <div className="text-xs text-ink-400 mt-0.5">
-              {basket.chain} · ${basket.budgetUsd.toFixed(0)} budget · {basket.tokens.length} tokens
+        <div className="flex items-start justify-between mb-4">
+          <div className="min-w-0">
+            <h3 className="font-semibold text-base truncate">{basket.name}</h3>
+            <div className="text-xs text-ink-400 mt-0.5 capitalize">
+              {basket.chain} · {fmtUsd(basket.budgetUsd)} budget · {basket.tokens.length} tokens
             </div>
           </div>
-          <div className={`text-xs px-2 py-0.5 rounded-full ${basket.enabled ? "bg-emerald-900/40 text-emerald-300" : "bg-ink-700 text-ink-400"}`}>
+          <div
+            className={`text-[11px] uppercase tracking-wider font-medium px-2 py-1 rounded-md flex items-center gap-1.5 ${
+              basket.enabled
+                ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                : "bg-ink-700 text-ink-400 border border-ink-600"
+            }`}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${basket.enabled ? "bg-emerald-400 animate-pulse" : "bg-ink-500"}`} />
             {basket.enabled ? "active" : "paused"}
           </div>
         </div>
 
-        <div className="mb-3 flex items-center justify-between text-xs bg-ink-900/40 border border-ink-700 rounded-lg px-3 py-2">
+        <div className="mb-4 flex items-center justify-between text-xs bg-ink-900/40 border border-ink-700 rounded-lg px-3 py-2.5">
           <div className="flex items-center gap-2 text-ink-400">
             <Wallet className="w-3.5 h-3.5" />
             <span>Wallet balance</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="font-mono text-ink-100">
-              {portfolio ? `$${portfolio.totalUsd.toFixed(2)}` : "—"}
+            <span className="font-semibold text-ink-100 tabular-nums">
+              {portfolio ? fmtUsd(portfolio.totalUsd) : "—"}
             </span>
             <button
               onClick={refreshBalance}
@@ -96,17 +104,28 @@ export default function BasketCard({ basket, onChange }: { basket: Basket; onCha
             const usd = portfolio?.byToken[sym];
             return (
               <div key={t.symbol} className="text-xs">
-                <div className="flex justify-between mb-0.5">
-                  <span className="font-mono text-ink-200">
+                <div className="flex justify-between mb-1">
+                  <span className="font-medium text-ink-100">
                     {t.symbol}
-                    {usd != null && <span className="text-ink-400 ml-2">${usd.toFixed(2)}</span>}
+                    {usd != null && (
+                      <span className="text-ink-400 font-normal ml-2 tabular-nums">{fmtUsd(usd)}</span>
+                    )}
                   </span>
-                  <span className="text-ink-400">
-                    {(current * 100).toFixed(1)}% → <span className="text-accent">{(target * 100).toFixed(1)}%</span>
+                  <span className="text-ink-400 tabular-nums">
+                    {(current * 100).toFixed(1)}% → <span className="text-accent font-medium">{(target * 100).toFixed(1)}%</span>
                   </span>
                 </div>
-                <div className="h-1.5 bg-ink-700 rounded-full overflow-hidden">
-                  <div className="h-full bg-accent transition-all" style={{ width: `${target * 100}%` }} />
+                <div className="h-1.5 bg-ink-700 rounded-full overflow-hidden relative">
+                  {current > 0 && (
+                    <div
+                      className="absolute inset-y-0 left-0 bg-ink-500/60 transition-all"
+                      style={{ width: `${current * 100}%` }}
+                    />
+                  )}
+                  <div
+                    className="absolute inset-y-0 left-0 bg-accent transition-all duration-500"
+                    style={{ width: `${target * 100}%` }}
+                  />
                 </div>
               </div>
             );
@@ -116,13 +135,25 @@ export default function BasketCard({ basket, onChange }: { basket: Basket; onCha
         {last && (
           <div className="mt-4 pt-4 border-t border-ink-700 text-xs">
             <div className="flex items-center justify-between">
-              <span className="text-ink-400">Last tick: {new Date(last.startedAt).toLocaleString()}</span>
-              <span className={last.guardOutcome.allow ? "text-emerald-400" : "text-amber-400"}>
-                {last.guardOutcome.allow ? `${last.swaps.length} swap(s)` : "denied"}
+              <span className="text-ink-400">Last tick · {fmtRelative(last.startedAt)}</span>
+              <span
+                className={`font-medium ${
+                  last.guardOutcome.allow
+                    ? last.swaps.length > 0
+                      ? "text-emerald-400"
+                      : "text-ink-300"
+                    : "text-amber-400"
+                }`}
+              >
+                {last.guardOutcome.allow
+                  ? last.swaps.length > 0
+                    ? `${last.swaps.length} swap${last.swaps.length === 1 ? "" : "s"}`
+                    : "no action"
+                  : "denied"}
               </span>
             </div>
             {!last.guardOutcome.allow && (
-              <p className="text-amber-400/80 mt-1">{last.guardOutcome.reason}</p>
+              <p className="text-amber-400/80 mt-1.5 leading-relaxed">{last.guardOutcome.reason}</p>
             )}
           </div>
         )}

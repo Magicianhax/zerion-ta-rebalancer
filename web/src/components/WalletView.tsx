@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Wallet, RefreshCw, Copy, Check, AlertCircle, ExternalLink } from "lucide-react";
 import { api, type WalletInfo } from "../api.ts";
+import { fmtUsd, fmtPercent, fmtAddress, fmtRelative } from "../utils/format.ts";
 
 interface Holding {
   symbol: string;
@@ -96,8 +97,8 @@ export default function WalletView() {
 
       {wallets.map((w) => (
         <div key={w.info.name} className="bg-ink-800 border border-ink-700 rounded-xl overflow-hidden">
-          <div className="p-5 border-b border-ink-700">
-            <div className="flex items-start justify-between mb-3">
+          <div className="p-5 border-b border-ink-700 bg-gradient-to-br from-accent/5 via-transparent to-transparent">
+            <div className="flex items-start justify-between mb-4">
               <div>
                 <h3 className="font-semibold text-base flex items-center gap-2">
                   <Wallet className="w-4 h-4 text-accent" />
@@ -108,9 +109,9 @@ export default function WalletView() {
                 </div>
               </div>
               <div className="text-right">
-                <div className="text-2xl font-mono">${w.totalUsd.toFixed(2)}</div>
+                <div className="text-3xl font-semibold tracking-tight tabular-nums">{fmtUsd(w.totalUsd)}</div>
                 <div className="text-xs text-ink-400">
-                  {w.fetchedAt ? `as of ${new Date(w.fetchedAt).toLocaleTimeString()}` : "—"}
+                  {w.fetchedAt ? `Updated ${fmtRelative(w.fetchedAt)}` : "—"}
                 </div>
               </div>
             </div>
@@ -152,15 +153,18 @@ export default function WalletView() {
             <div className="divide-y divide-ink-700">
               {w.holdings.map((h, i) => (
                 <div key={`${h.chain}-${h.symbol}-${i}`} className="flex items-center justify-between px-5 py-3 hover:bg-ink-900/30 transition">
-                  <div>
-                    <div className="font-mono text-sm">{h.symbol}</div>
-                    <div className="text-xs text-ink-400 capitalize">{h.chain}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="font-mono text-sm">${h.usd.toFixed(2)}</div>
-                    <div className="text-xs text-ink-400">
-                      {((h.usd / w.totalUsd) * 100).toFixed(1)}%
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-full bg-accent/10 flex items-center justify-center text-xs font-mono font-medium text-accent border border-accent/20 shrink-0">
+                      {h.symbol.slice(0, 3)}
                     </div>
+                    <div className="min-w-0">
+                      <div className="font-medium text-sm">{h.symbol}</div>
+                      <div className="text-xs text-ink-400 capitalize">{h.chain}</div>
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="font-medium text-sm tabular-nums">{fmtUsd(h.usd)}</div>
+                    <div className="text-xs text-ink-400 tabular-nums">{fmtPercent(h.usd / w.totalUsd)}</div>
                   </div>
                 </div>
               ))}
@@ -186,17 +190,20 @@ function AddressRow({
   onCopy: () => void;
 }) {
   return (
-    <div className="flex items-center gap-2 text-xs bg-ink-900/40 rounded-lg px-3 py-2">
+    <div className="flex items-center gap-2 text-xs bg-ink-900/40 rounded-lg px-3 py-2 group">
       <span className="text-ink-400 w-20 shrink-0">{chain}</span>
-      <code className="font-mono text-ink-200 flex-1 truncate">{address}</code>
-      <button onClick={onCopy} className="p-1 hover:bg-ink-700 rounded" title="Copy">
+      <code className="font-mono text-ink-200 flex-1 truncate" title={address}>
+        <span className="hidden sm:inline">{address}</span>
+        <span className="sm:hidden">{fmtAddress(address)}</span>
+      </code>
+      <button onClick={onCopy} className="p-1.5 hover:bg-ink-700 rounded transition" title="Copy">
         {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
       </button>
       <a
         href={explorer}
         target="_blank"
         rel="noopener noreferrer"
-        className="p-1 hover:bg-ink-700 rounded"
+        className="p-1.5 hover:bg-ink-700 rounded transition"
         title="View on explorer"
       >
         <ExternalLink className="w-3 h-3" />

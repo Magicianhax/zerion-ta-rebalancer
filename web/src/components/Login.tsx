@@ -23,14 +23,18 @@ export default function Login({ onAuthed }: { onAuthed: () => void }) {
   };
 
   return (
-    <div className="min-h-full flex items-center justify-center bg-gradient-to-b from-ink-900 to-ink-800 p-6">
-      <form onSubmit={submit} className="w-full max-w-sm space-y-6">
+    <div className="min-h-full flex items-center justify-center p-6 relative overflow-hidden">
+      {/* Subtle ambient gradient — does the heavy lifting on the page feeling intentional */}
+      <div className="absolute inset-0 bg-gradient-to-b from-ink-900 to-ink-800" />
+      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[500px] h-[500px] rounded-full bg-accent/10 blur-[100px] pointer-events-none" />
+
+      <form onSubmit={submit} className="w-full max-w-sm space-y-6 relative">
         <div className="text-center">
-          <div className="mx-auto w-12 h-12 rounded-full bg-accent/20 flex items-center justify-center mb-4">
-            <Lock className="w-5 h-5 text-accent" />
+          <div className="mx-auto w-14 h-14 rounded-2xl bg-gradient-to-br from-accent to-accent-dim flex items-center justify-center mb-5 shadow-lg shadow-accent/20">
+            <Lock className="w-6 h-6 text-white" />
           </div>
           <h1 className="text-2xl font-semibold tracking-tight">Zerion TA Rebalancer</h1>
-          <p className="text-ink-400 text-sm mt-1">Self-hosted. Policy-bounded. Hourly.</p>
+          <p className="text-ink-400 text-sm mt-1">Self-hosted · Policy-bounded · Hourly</p>
         </div>
 
         <div className="space-y-2">

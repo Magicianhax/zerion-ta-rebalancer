@@ -5,6 +5,8 @@ import BasketCard from "./BasketCard.tsx";
 import NewBasketModal from "./NewBasketModal.tsx";
 import SettingsPanel from "./SettingsPanel.tsx";
 import WalletView from "./WalletView.tsx";
+import StatsStrip from "./StatsStrip.tsx";
+import { BasketCardSkeleton } from "./Skeleton.tsx";
 
 type Tab = "baskets" | "wallet";
 
@@ -70,6 +72,8 @@ export default function Dashboard({ baskets, lastEvent, onRefresh, onLogout }: P
       <main className="max-w-6xl mx-auto px-6 py-8">
         {tab === "baskets" && (
           <>
+            {baskets && baskets.length > 0 && <StatsStrip baskets={baskets} />}
+
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-semibold">Baskets</h2>
               <button
@@ -81,10 +85,16 @@ export default function Dashboard({ baskets, lastEvent, onRefresh, onLogout }: P
             </div>
 
             {baskets === null ? (
-              <div className="text-ink-400">Loading…</div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <BasketCardSkeleton />
+                <BasketCardSkeleton />
+              </div>
             ) : baskets.length === 0 ? (
               <div className="border border-dashed border-ink-600 rounded-xl p-12 text-center">
-                <div className="text-ink-300 mb-2">No baskets yet</div>
+                <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-accent/10 flex items-center justify-center">
+                  <Plus className="w-5 h-5 text-accent" />
+                </div>
+                <div className="text-ink-200 font-medium mb-2">No baskets yet</div>
                 <p className="text-sm text-ink-400 max-w-md mx-auto mb-4">
                   A basket holds the tokens you want auto-rebalanced. The bot will hold initial weights you set,
                   then nudge them every hour based on TA signals — within your policy limits.
