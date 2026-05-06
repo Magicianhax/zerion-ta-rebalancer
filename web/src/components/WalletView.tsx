@@ -7,9 +7,10 @@ interface Holding {
   symbol: string;
   chain: "solana" | "base";
   usd: number;
+  logoUrl: string | null;
 }
 
-interface WalletData {
+export interface WalletData {
   info: WalletInfo;
   totalUsd: number;
   holdings: Holding[];
@@ -17,46 +18,16 @@ interface WalletData {
   fetchedAt: string | null;
 }
 
-export default function WalletView() {
-  const [wallets, setWallets] = useState<WalletData[] | null>(null);
-  const [loading, setLoading] = useState(false);
+interface Props {
+  /** Cached wallet data lifted to a parent so tab switches don't refetch. */
+  wallets: WalletData[] | null;
+  loading: boolean;
+  /** Manual refresh — only fires on user click. */
+  onRefresh: () => Promise<void>;
+}
+
+export default function WalletView({ wallets, loading, onRefresh }: Props) {
   const [copied, setCopied] = useState<string | null>(null);
-
-  const refresh = async () => {
-    setLoading(true);
-    try {
-      const list = await api.listWallets();
-      const enriched = await Promise.all(
-        list.wallets.map(async (info) => {
-          try {
-            const r = await api.walletHoldings(info.name);
-            return {
-              info,
-              totalUsd: r.totalUsd,
-              holdings: r.holdings,
-              errors: r.errors,
-              fetchedAt: r.fetchedAt,
-            };
-          } catch (e: any) {
-            return {
-              info,
-              totalUsd: 0,
-              holdings: [],
-              errors: [e.message],
-              fetchedAt: null,
-            };
-          }
-        }),
-      );
-      setWallets(enriched);
-    } catch {
-      setWallets([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { refresh(); }, []);
 
   const copy = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
@@ -87,7 +58,7 @@ export default function WalletView() {
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-semibold">Wallets</h2>
         <button
-          onClick={refresh}
+          onClick={onRefresh}
           disabled={loading}
           className="bg-ink-700 hover:bg-ink-600 disabled:opacity-50 text-sm rounded-lg px-3 py-2 flex items-center gap-2 transition"
         >
@@ -154,9 +125,7 @@ export default function WalletView() {
               {w.holdings.map((h, i) => (
                 <div key={`${h.chain}-${h.symbol}-${i}`} className="flex items-center justify-between px-5 py-3 hover:bg-ink-900/30 transition">
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-9 h-9 rounded-full bg-accent/10 flex items-center justify-center text-xs font-mono font-medium text-accent border border-accent/20 shrink-0">
-                      {h.symbol.slice(0, 3)}
-                    </div>
+                    <TokenAvatar symbol={h.symbol} logoUrl={h.logoUrl} />
                     <div className="min-w-0">
                       <div className="font-medium text-sm">{h.symbol}</div>
                       <div className="text-xs text-ink-400 capitalize">{h.chain}</div>
@@ -173,6 +142,30 @@ export default function WalletView() {
         </div>
       ))}
     </div>
+  );
+}
+
+/**
+ * Token avatar — real logo when we have a URL, falls back to a colored
+ * letter chip. The img onError swap handles dead/blocked CDNs at runtime.
+ */
+function TokenAvatar({ symbol, logoUrl }: { symbol: string; logoUrl: string | null }) {
+  const [errored, setErrored] = useState(false);
+  if (!logoUrl || errored) {
+    return (
+      <div className="w-9 h-9 rounded-full bg-accent/10 flex items-center justify-center text-xs font-mono font-medium text-accent border border-accent/20 shrink-0">
+        {symbol.slice(0, 3)}
+      </div>
+    );
+  }
+  return (
+    <img
+      src={logoUrl}
+      alt={symbol}
+      loading="lazy"
+      onError={() => setErrored(true)}
+      className="w-9 h-9 rounded-full shrink-0 bg-ink-700 ring-1 ring-ink-700"
+    />
   );
 }
 

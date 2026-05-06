@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { LogOut, Plus, Settings as SettingsIcon, Activity, Wallet as WalletIcon, LayoutGrid } from "lucide-react";
-import type { Basket } from "../api.ts";
+import { api, type Basket } from "../api.ts";
 import BasketCard from "./BasketCard.tsx";
 import NewBasketModal from "./NewBasketModal.tsx";
 import SettingsPanel from "./SettingsPanel.tsx";
-import WalletView from "./WalletView.tsx";
+import WalletView, { type WalletData } from "./WalletView.tsx";
 import StatsStrip from "./StatsStrip.tsx";
 import { BasketCardSkeleton } from "./Skeleton.tsx";
 
@@ -21,6 +21,54 @@ export default function Dashboard({ baskets, lastEvent, onRefresh, onLogout }: P
   const [showNew, setShowNew] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [tab, setTab] = useState<Tab>("baskets");
+
+  // Wallet data lives at this level so tab switches don't refetch.
+  // First mount of the Wallet tab triggers an initial fetch; after that,
+  // refresh is only manual via the Refresh button.
+  const [wallets, setWallets] = useState<WalletData[] | null>(null);
+  const [walletsLoading, setWalletsLoading] = useState(false);
+
+  const refreshWallets = async () => {
+    setWalletsLoading(true);
+    try {
+      const list = await api.listWallets();
+      const enriched = await Promise.all(
+        list.wallets.map(async (info) => {
+          try {
+            const r = await api.walletHoldings(info.name);
+            return {
+              info,
+              totalUsd: r.totalUsd,
+              holdings: r.holdings,
+              errors: r.errors,
+              fetchedAt: r.fetchedAt,
+            };
+          } catch (e: any) {
+            return {
+              info,
+              totalUsd: 0,
+              holdings: [],
+              errors: [e.message],
+              fetchedAt: null,
+            };
+          }
+        }),
+      );
+      setWallets(enriched);
+    } catch {
+      setWallets([]);
+    } finally {
+      setWalletsLoading(false);
+    }
+  };
+
+  // Fetch wallets the first time the user opens the Wallet tab — never again
+  // unless they hit Refresh. Tab switches are pure render, no network.
+  useEffect(() => {
+    if (tab === "wallet" && wallets === null && !walletsLoading) {
+      refreshWallets();
+    }
+  }, [tab]);
 
   return (
     <div className="min-h-full">
@@ -116,7 +164,9 @@ export default function Dashboard({ baskets, lastEvent, onRefresh, onLogout }: P
           </>
         )}
 
-        {tab === "wallet" && <WalletView />}
+        {tab === "wallet" && (
+          <WalletView wallets={wallets} loading={walletsLoading} onRefresh={refreshWallets} />
+        )}
       </main>
 
       {showNew && <NewBasketModal onClose={() => setShowNew(false)} onCreated={() => { setShowNew(false); onRefresh(); }} />}

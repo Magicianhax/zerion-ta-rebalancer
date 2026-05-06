@@ -69,7 +69,7 @@ export const api = {
     request<{
       wallet: string;
       totalUsd: number;
-      holdings: Array<{ symbol: string; chain: Chain; usd: number }>;
+      holdings: Array<{ symbol: string; chain: Chain; usd: number; logoUrl: string | null }>;
       errors: string[];
       fetchedAt: string;
     }>(`/wallets/${encodeURIComponent(name)}/holdings`),

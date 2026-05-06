@@ -22,7 +22,11 @@ export interface TokenEntry {
   poolAddress: string;
   /** Whether this token is a stable quote (USDC/USDT) */
   isQuote?: boolean;
+  /** Logo URL — pinned to a stable CDN; fallback to letter avatar if absent */
+  logoUrl?: string;
 }
+
+const COINGECKO = "https://assets.coingecko.com/coins/images";
 
 const BASE_TOKENS: TokenEntry[] = [
   {
@@ -32,13 +36,15 @@ const BASE_TOKENS: TokenEntry[] = [
     decimals: 6,
     poolAddress: "",
     isQuote: true,
+    logoUrl: `${COINGECKO}/6319/standard/usdc.png`,
   },
   {
     symbol: "ETH",
     name: "Ethereum",
     address: "0x0000000000000000000000000000000000000000",
     decimals: 18,
-    poolAddress: "0xd0b53d9277642d899df5c87a3966a349a798f224", // Uniswap V3 ETH/USDC 0.05%
+    poolAddress: "0xd0b53d9277642d899df5c87a3966a349a798f224",
+    logoUrl: `${COINGECKO}/279/standard/ethereum.png`,
   },
   {
     symbol: "AERO",
@@ -46,6 +52,7 @@ const BASE_TOKENS: TokenEntry[] = [
     address: "0x940181a94a35a4569e4529a3cdfb74e38fd98631",
     decimals: 18,
     poolAddress: "0x6cdcb1c4a4d1c3c6d054b27ac5b77e89eafb971d",
+    logoUrl: `${COINGECKO}/31745/standard/token.png`,
   },
   {
     symbol: "DEGEN",
@@ -53,6 +60,7 @@ const BASE_TOKENS: TokenEntry[] = [
     address: "0x4ed4e862860bed51a9570b96d89af5e1b0efefed",
     decimals: 18,
     poolAddress: "0x7c89d8cffc3909c7c11b0ef8b9b2a7e3a3a1c2d4",
+    logoUrl: `${COINGECKO}/34515/standard/android-chrome-512x512.png`,
   },
   {
     symbol: "BRETT",
@@ -60,6 +68,7 @@ const BASE_TOKENS: TokenEntry[] = [
     address: "0x532f27101965dd16442e59d40670faf5ebb142e4",
     decimals: 18,
     poolAddress: "0xbA3F945812a83471d709BCe9C3CA699A19FB46f7",
+    logoUrl: `${COINGECKO}/35529/standard/1000050750.png`,
   },
   {
     symbol: "CBBTC",
@@ -67,6 +76,7 @@ const BASE_TOKENS: TokenEntry[] = [
     address: "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf",
     decimals: 8,
     poolAddress: "0x4e962bb3889bf030368f56810a9c96b83cb3e778",
+    logoUrl: `${COINGECKO}/40143/standard/cbbtc.webp`,
   },
 ];
 
@@ -78,13 +88,15 @@ const SOLANA_TOKENS: TokenEntry[] = [
     decimals: 6,
     poolAddress: "",
     isQuote: true,
+    logoUrl: `${COINGECKO}/6319/standard/usdc.png`,
   },
   {
     symbol: "SOL",
     name: "Solana",
     address: "So11111111111111111111111111111111111111112",
     decimals: 9,
-    poolAddress: "Czfq3xZZDmsdGdUyrNLtRhGc47cXcZtL2eWBaeskRTLB", // Orca SOL/USDC
+    poolAddress: "Czfq3xZZDmsdGdUyrNLtRhGc47cXcZtL2eWBaeskRTLB",
+    logoUrl: `${COINGECKO}/4128/standard/solana.png`,
   },
   {
     symbol: "BONK",
@@ -92,6 +104,7 @@ const SOLANA_TOKENS: TokenEntry[] = [
     address: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
     decimals: 5,
     poolAddress: "8sLbNZoA1cfnvMJLPfp98ZLAnFSYCFApfJKMbiXNLwxj",
+    logoUrl: `${COINGECKO}/28600/standard/bonk.jpg`,
   },
   {
     symbol: "JUP",
@@ -99,6 +112,7 @@ const SOLANA_TOKENS: TokenEntry[] = [
     address: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
     decimals: 6,
     poolAddress: "C1MgLojNLWBKADvu9BHdtgzz1oZX4dZ5zGdGcgvvW8Wz",
+    logoUrl: `${COINGECKO}/34188/standard/jup.png`,
   },
   {
     symbol: "WIF",
@@ -106,6 +120,7 @@ const SOLANA_TOKENS: TokenEntry[] = [
     address: "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
     decimals: 6,
     poolAddress: "EP2ib6dYdEeqD8MfE2ezHCxX3kP3K2eLKkirfPm5eyMx",
+    logoUrl: `${COINGECKO}/33767/standard/dogwifhat.jpg`,
   },
   {
     symbol: "JTO",
@@ -113,6 +128,7 @@ const SOLANA_TOKENS: TokenEntry[] = [
     address: "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL",
     decimals: 9,
     poolAddress: "C9U2Ksk6KKWvLEeo5yUQ7Xu46X7NzeBJtd9PBfuXaUSM",
+    logoUrl: `${COINGECKO}/33228/standard/jto.png`,
   },
 ];
 

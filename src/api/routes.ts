@@ -19,6 +19,7 @@ import { events, rebalance } from "../core/rebalancer.ts";
 import { listTokens } from "../core/token-registry.ts";
 import { listAgentTokens, listPolicies, positions, walletList } from "../core/zerion.ts";
 import { summarizePositions } from "../core/positions-parser.ts";
+import { findToken } from "../core/token-registry.ts";
 import type { Basket, Chain } from "../types.ts";
 import { config } from "../config.ts";
 
@@ -185,8 +186,10 @@ api.get("/wallets", async (c) => {
 api.get("/wallets/:name/holdings", async (c) => {
   const name = c.req.param("name");
   const chains: Chain[] = ["solana", "base"];
-  type Holding = { symbol: string; chain: Chain; usd: number };
-  const holdings: Holding[] = [];
+  // Aggregate by (chain, symbol) — Zerion returns separate positions for
+  // native + wrapped variants of the same token, but the user thinks of them
+  // as one balance. Sum the USD value into a single row.
+  const aggregated = new Map<string, { symbol: string; chain: Chain; usd: number }>();
   let totalUsd = 0;
   const errors: string[] = [];
 
@@ -199,7 +202,10 @@ api.get("/wallets/:name/holdings", async (c) => {
         if (!symbol) continue;
         const usd = Number(item?.value ?? item?.value_usd ?? 0);
         if (!Number.isFinite(usd) || usd <= 0) continue;
-        holdings.push({ symbol, chain, usd });
+        const key = `${chain}:${symbol}`;
+        const existing = aggregated.get(key);
+        if (existing) existing.usd += usd;
+        else aggregated.set(key, { symbol, chain, usd });
         totalUsd += usd;
       }
     } catch (e: any) {
@@ -207,7 +213,12 @@ api.get("/wallets/:name/holdings", async (c) => {
     }
   }
 
-  holdings.sort((a, b) => b.usd - a.usd);
+  const holdings = [...aggregated.values()]
+    .sort((a, b) => b.usd - a.usd)
+    .map((h) => ({
+      ...h,
+      logoUrl: findToken(h.chain, h.symbol)?.logoUrl ?? null,
+    }));
   return c.json({
     wallet: name,
     totalUsd: Math.round(totalUsd * 100) / 100,
