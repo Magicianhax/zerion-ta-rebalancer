@@ -109,8 +109,36 @@ export interface WalletInfo {
   createdAt: string;
 }
 
+/**
+ * Long-lived cache for read-only metadata commands. These change rarely
+ * (only after explicit user action: setup wizard, creating a basket, etc.)
+ * so we cache for 5 minutes by default. The huge win here is dashboard
+ * load — every page render fanned out 3-5 subprocess spawns and each
+ * subprocess spends ~30s on /mnt/d resolving ESM imports.
+ */
+interface MetaCacheEntry {
+  promise: Promise<any>;
+  expiresAt: number;
+}
+const META_CACHE = new Map<string, MetaCacheEntry>();
+const META_TTL_MS = 5 * 60_000;
+
+export function invalidateMetaCache(): void {
+  META_CACHE.clear();
+}
+
+function cachedZerion(key: string, args: string[], ttlMs = META_TTL_MS): Promise<any> {
+  const now = Date.now();
+  const cached = META_CACHE.get(key);
+  if (cached && cached.expiresAt > now) return cached.promise;
+  const promise = runZerion(args);
+  META_CACHE.set(key, { promise, expiresAt: now + ttlMs });
+  promise.catch(() => META_CACHE.delete(key));
+  return promise;
+}
+
 export async function walletList(): Promise<WalletInfo[]> {
-  const out = await runZerion(["wallet", "list"]);
+  const out = await cachedZerion("wallet:list", ["wallet", "list"]);
   return out?.wallets ?? [];
 }
 
@@ -184,12 +212,12 @@ export async function positions(
 }
 
 export async function listPolicies(): Promise<any[]> {
-  const out = await runZerion(["agent", "list-policies"]);
+  const out = await cachedZerion("agent:list-policies", ["agent", "list-policies"]);
   return out?.policies ?? [];
 }
 
 export async function listAgentTokens(): Promise<any[]> {
-  const out = await runZerion(["agent", "list-tokens"]);
+  const out = await cachedZerion("agent:list-tokens", ["agent", "list-tokens"]);
   return out?.tokens ?? [];
 }
 
