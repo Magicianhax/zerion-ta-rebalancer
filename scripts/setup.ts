@@ -91,7 +91,6 @@ function runCli(args: string[]): Promise<CliResult> {
 }
 
 function tryParseJson(str: string): any {
-  // CLI may print non-JSON noise before the JSON block; find first { ... }
   const match = str.match(/\{[\s\S]*\}\s*$/);
   if (!match) return null;
   try {
@@ -99,6 +98,58 @@ function tryParseJson(str: string): any {
   } catch {
     return null;
   }
+}
+
+interface ExistingWallet { name: string; isDefault?: boolean }
+interface ExistingPolicy { id: string; name: string; summary?: string }
+interface ExistingToken { name: string; wallet: string; policies?: Array<{ id: string }>; active?: boolean }
+
+async function listExistingWallets(): Promise<ExistingWallet[]> {
+  const r = await runCli(["wallet", "list"]);
+  if (r.code !== 0) return [];
+  const json = tryParseJson(r.stdout);
+  return Array.isArray(json?.wallets) ? json.wallets : [];
+}
+
+async function listExistingPolicies(): Promise<ExistingPolicy[]> {
+  const r = await runCli(["agent", "list-policies"]);
+  if (r.code !== 0) return [];
+  const json = tryParseJson(r.stdout);
+  return Array.isArray(json?.policies) ? json.policies : [];
+}
+
+async function listExistingTokens(): Promise<ExistingToken[]> {
+  const r = await runCli(["agent", "list-tokens"]);
+  if (r.code !== 0) return [];
+  const json = tryParseJson(r.stdout);
+  return Array.isArray(json?.tokens) ? json.tokens : [];
+}
+
+/**
+ * Generic single-or-pick selector.
+ *   - 0 items → null (caller decides what to do)
+ *   - 1 item  → auto-select with confirmation message
+ *   - 2+      → numbered list, user picks by number; default = first/marked
+ */
+async function pickOne<T>(
+  label: string,
+  items: T[],
+  render: (item: T, idx: number) => string,
+  defaultIdx: number = 0,
+): Promise<T | null> {
+  if (items.length === 0) return null;
+  if (items.length === 1) {
+    stdout.write(`✓ Using existing ${label}: ${render(items[0]!, 0)}\n`);
+    return items[0]!;
+  }
+  stdout.write(`\nWhich ${label}?\n`);
+  items.forEach((it, i) => {
+    const marker = i === defaultIdx ? " (default)" : "";
+    stdout.write(`  ${i + 1}. ${render(it, i)}${marker}\n`);
+  });
+  const raw = await ask("Pick a number", String(defaultIdx + 1));
+  const idx = parseInt(raw, 10) - 1;
+  return items[idx >= 0 && idx < items.length ? idx : defaultIdx]!;
 }
 
 function fail(message: string, result?: CliResult): never {
@@ -146,106 +197,178 @@ async function main() {
   // ── Step 1: wallet ─────────────────────────────────────────────────
   stdout.write("Step 1 — Wallet\n");
   stdout.write("───────────────\n");
-  stdout.write("Tip: When the CLI asks for a passphrase, type carefully —\n");
-  stdout.write("     masking hides typos. Use 12+ alphanumeric chars; avoid\n");
-  stdout.write("     symbols that some terminals mangle. Same string twice.\n\n");
-  stdout.write("Listing your existing wallets...\n\n");
-  await runCli(["wallet", "list", "--pretty"]);
+  const existingWallets = await listExistingWallets();
 
   let walletName = "";
-  if (await askYN("\nCreate a new wallet now?")) {
+
+  if (existingWallets.length > 0) {
+    stdout.write(`Found ${existingWallets.length} existing wallet${existingWallets.length === 1 ? "" : "s"}:\n`);
+    for (const w of existingWallets) {
+      stdout.write(`  • ${w.name}${w.isDefault ? " (default)" : ""}\n`);
+    }
+    stdout.write("\n");
+    if (await askYN("Create a new wallet?", false)) {
+      walletName = await ask("Wallet name", "rebalancer");
+      if (!walletName || /\s/.test(walletName) || !/^[a-z0-9-]+$/i.test(walletName)) {
+        fail(`Wallet name must be alphanumeric or '-' (no spaces). Got: "${walletName}"`);
+      }
+      stdout.write("\nTip: passphrase is masked. Use 12+ alphanumeric chars. Type the same string twice.\n");
+      stdout.write(`\nRunning: zerion wallet create --name ${walletName}\n\n`);
+      const result = await runCli(["wallet", "create", "--name", walletName]);
+      if (result.code !== 0) {
+        fail(
+          "Wallet creation failed. Most common cause: the two passphrase entries didn't match.\n" +
+          "Re-run setup and type the same passphrase both times.",
+          result,
+        );
+      }
+    } else {
+      const defaultIdx = Math.max(0, existingWallets.findIndex((w) => w.isDefault));
+      const picked = await pickOne(
+        "wallet",
+        existingWallets,
+        (w) => w.name,
+        defaultIdx,
+      );
+      walletName = picked!.name;
+    }
+  } else {
+    stdout.write("No existing wallets — creating a new one.\n");
+    stdout.write("Tip: passphrase is masked. Use 12+ alphanumeric chars. Type the same string twice.\n\n");
     walletName = await ask("Wallet name", "rebalancer");
     if (!walletName || /\s/.test(walletName) || !/^[a-z0-9-]+$/i.test(walletName)) {
       fail(`Wallet name must be alphanumeric or '-' (no spaces). Got: "${walletName}"`);
     }
-    stdout.write(`\nRunning: zerion wallet create --name ${walletName}\n`);
-    stdout.write("(OWS will encrypt this with your passphrase. Takes ~5 seconds.)\n\n");
+    stdout.write(`\nRunning: zerion wallet create --name ${walletName}\n\n`);
     const result = await runCli(["wallet", "create", "--name", walletName]);
     if (result.code !== 0) {
       fail(
         "Wallet creation failed. Most common cause: the two passphrase entries didn't match.\n" +
-        "Re-run setup and type the same passphrase both times — write it down beforehand if needed.",
-        result
+        "Re-run setup and type the same passphrase both times.",
+        result,
       );
     }
-  } else {
-    walletName = await ask("Existing wallet name to use");
-    if (!walletName) fail("No wallet name provided.");
   }
 
   // ── Step 2: policy ─────────────────────────────────────────────────
   stdout.write("\nStep 2 — Policy\n");
   stdout.write("───────────────\n");
-  stdout.write("Builds a tight policy: chain-locked + deny-transfers + deny-approvals\n");
-  stdout.write("+ daily transaction cap. All enforced at the OWS signing layer.\n\n");
+  const existingPolicies = await listExistingPolicies();
 
-  const chain = await ask("Chain to lock to (base or solana)", config.defaultChain);
-  if (chain !== "base" && chain !== "solana") {
-    fail(`Chain must be 'base' or 'solana'. Got: "${chain}"`);
-  }
+  let policyId = "";
+  let chain = config.defaultChain;
 
-  const dailyLimit = await ask("Max swaps per 24h (anti-churn)", "8");
-  const dailyLimitN = parseInt(dailyLimit, 10);
-  if (!Number.isFinite(dailyLimitN) || dailyLimitN <= 0) {
-    fail(`Daily limit must be a positive integer. Got: "${dailyLimit}"`);
-  }
+  const useExistingPolicy =
+    existingPolicies.length > 0 &&
+    !(await askYN(
+      `Found ${existingPolicies.length} existing polic${existingPolicies.length === 1 ? "y" : "ies"}. Create a new one instead?`,
+      false,
+    ));
 
-  const expires = await ask("Token expiry (e.g. 7d, 30d)", "30d");
-  if (!parseDuration(expires)) {
-    fail(`Expiry must be in the form '<number><h|d>' — e.g. "24h" or "30d". Got: "${expires}"`);
-  }
-
-  const policyName = await ask("Policy name", `rebalancer-${chain}`);
-  if (!/^[a-z0-9-]+$/i.test(policyName)) {
-    fail(`Policy name must be alphanumeric or '-'. Got: "${policyName}"`);
-  }
-
-  const policyArgs = [
-    "agent", "create-policy",
-    "--name", policyName,
-    "--chains", chain,
-    "--expires", expires,
-    "--deny-transfers",
-    "--deny-approvals",
-    "--daily-tx-limit", dailyLimit,
-  ];
-  stdout.write(`\nRunning: zerion ${policyArgs.join(" ")}\n\n`);
-  const policyRes = await runCli(policyArgs);
-  if (policyRes.code !== 0) {
-    fail("Policy creation failed.", policyRes);
-  }
-  const policyJson = tryParseJson(policyRes.stdout);
-  const policyId = policyJson?.policy?.id;
-  if (!policyId) {
-    fail(
-      "Could not extract policy id from CLI output. The policy may still have been created — \n" +
-      "check 'zerion agent list-policies' and re-run setup with the existing policy if so.",
-      policyRes
+  if (useExistingPolicy) {
+    const picked = await pickOne(
+      "policy",
+      existingPolicies,
+      (p) => `${p.name} — ${p.summary ?? p.id}`,
     );
+    policyId = picked!.id;
+    // Pull chain from summary if possible: "chains: solana | expires ..."
+    const chainMatch = picked!.summary?.match(/chains?:\s*(\w+)/i);
+    if (chainMatch) chain = chainMatch[1] as typeof chain;
+  } else {
+    stdout.write("Building a tight policy: chain-lock + deny-transfers + deny-approvals + daily-tx cap.\n\n");
+    const chainAns = await ask("Chain to lock to (base or solana)", config.defaultChain);
+    if (chainAns !== "base" && chainAns !== "solana") {
+      fail(`Chain must be 'base' or 'solana'. Got: "${chainAns}"`);
+    }
+    chain = chainAns as typeof chain;
+
+    const dailyLimit = await ask("Max swaps per 24h (anti-churn)", "8");
+    const dailyLimitN = parseInt(dailyLimit, 10);
+    if (!Number.isFinite(dailyLimitN) || dailyLimitN <= 0) {
+      fail(`Daily limit must be a positive integer. Got: "${dailyLimit}"`);
+    }
+
+    const expires = await ask("Token expiry (e.g. 7d, 30d)", "30d");
+    if (!parseDuration(expires)) {
+      fail(`Expiry must be in the form '<number><h|d>' — e.g. "24h" or "30d". Got: "${expires}"`);
+    }
+
+    const policyName = await ask("Policy name", `rebalancer-${chain}`);
+    if (!/^[a-z0-9-]+$/i.test(policyName)) {
+      fail(`Policy name must be alphanumeric or '-'. Got: "${policyName}"`);
+    }
+
+    const policyArgs = [
+      "agent", "create-policy",
+      "--name", policyName,
+      "--chains", chain,
+      "--expires", expires,
+      "--deny-transfers",
+      "--deny-approvals",
+      "--daily-tx-limit", dailyLimit,
+    ];
+    stdout.write(`\nRunning: zerion ${policyArgs.join(" ")}\n\n`);
+    const policyRes = await runCli(policyArgs);
+    if (policyRes.code !== 0) {
+      fail("Policy creation failed.", policyRes);
+    }
+    const policyJson = tryParseJson(policyRes.stdout);
+    policyId = policyJson?.policy?.id;
+    if (!policyId) {
+      fail(
+        "Could not extract policy id from CLI output. The policy may still have been created — \n" +
+        "check 'zerion agent list-policies' and re-run setup with the existing policy if so.",
+        policyRes,
+      );
+    }
+    stdout.write(`\n✅ Policy created: ${policyId}\n`);
   }
-  stdout.write(`\n✅ Policy created: ${policyId}\n`);
 
   // ── Step 3: agent token ────────────────────────────────────────────
   stdout.write("\nStep 3 — Agent Token\n");
   stdout.write("────────────────────\n");
-  const tokenName = await ask("Agent token name", `${walletName}-agent`);
-  if (!/^[a-z0-9-]+$/i.test(tokenName)) {
-    fail(`Token name must be alphanumeric or '-'. Got: "${tokenName}"`);
-  }
-  const tokenArgs = [
-    "agent", "create-token",
-    "--name", tokenName,
-    "--wallet", walletName,
-    "--policy", policyId,
-  ];
-  stdout.write(`\nRunning: zerion ${tokenArgs.join(" ")}\n`);
-  stdout.write("(Re-enter the wallet passphrase you set in step 1.)\n\n");
-  const tokenRes = await runCli(tokenArgs);
-  if (tokenRes.code !== 0) {
-    fail(
-      "Agent token creation failed. Most common cause: wrong passphrase. Try again.",
-      tokenRes
+  const existingTokens = await listExistingTokens();
+  // Tokens that match the chosen wallet AND have the chosen policy attached
+  const compatibleTokens = existingTokens.filter(
+    (t) => t.wallet === walletName && t.policies?.some((p) => p.id === policyId),
+  );
+
+  let tokenName = "";
+
+  if (
+    compatibleTokens.length > 0 &&
+    !(await askYN(
+      `Found ${compatibleTokens.length} agent token${compatibleTokens.length === 1 ? "" : "s"} already bound to wallet "${walletName}" and the chosen policy. Create a new one instead?`,
+      false,
+    ))
+  ) {
+    const picked = await pickOne(
+      "agent token",
+      compatibleTokens,
+      (t) => `${t.name}${t.active ? " (active)" : ""}`,
     );
+    tokenName = picked!.name;
+  } else {
+    tokenName = await ask("Agent token name", `${walletName}-agent`);
+    if (!/^[a-z0-9-]+$/i.test(tokenName)) {
+      fail(`Token name must be alphanumeric or '-'. Got: "${tokenName}"`);
+    }
+    const tokenArgs = [
+      "agent", "create-token",
+      "--name", tokenName,
+      "--wallet", walletName,
+      "--policy", policyId,
+    ];
+    stdout.write(`\nRunning: zerion ${tokenArgs.join(" ")}\n`);
+    stdout.write("(Re-enter the wallet passphrase you set in step 1.)\n\n");
+    const tokenRes = await runCli(tokenArgs);
+    if (tokenRes.code !== 0) {
+      fail(
+        "Agent token creation failed. Most common cause: wrong passphrase. Try again.",
+        tokenRes,
+      );
+    }
   }
 
   // ── Step 4: backup ─────────────────────────────────────────────────
@@ -319,8 +442,7 @@ async function main() {
   stdout.write(`  • Wallet:        ${walletName}\n`);
   stdout.write(`  • Policy:        ${policyId}\n`);
   stdout.write(`  • Agent token:   ${tokenName}\n`);
-  stdout.write(`  • Chain:         ${chain}\n`);
-  stdout.write(`  • Daily tx cap:  ${dailyLimit} swaps / 24h\n\n`);
+  stdout.write(`  • Chain:         ${chain}\n\n`);
   stdout.write("Next steps:\n");
   stdout.write("  1. Fund the wallet (see above)\n");
   stdout.write("  2. npm start      — boot the rebalancer (if not already running)\n");
