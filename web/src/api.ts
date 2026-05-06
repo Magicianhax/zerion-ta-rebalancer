@@ -145,6 +145,7 @@ export interface TokenEntry {
   decimals: number;
   poolAddress: string;
   isQuote?: boolean;
+  logoUrl?: string | null;
 }
 
 export interface WalletInfo {
