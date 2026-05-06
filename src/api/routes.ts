@@ -176,6 +176,47 @@ api.get("/wallets", async (c) => {
   }
 });
 
+/**
+ * Full holdings for a wallet across the chains we support. Aggregates
+ * positions from each chain's address. Used by the Wallet page on the
+ * dashboard. Slow because it shells out per chain — call manually, not
+ * on a poll loop.
+ */
+api.get("/wallets/:name/holdings", async (c) => {
+  const name = c.req.param("name");
+  const chains: Chain[] = ["solana", "base"];
+  type Holding = { symbol: string; chain: Chain; usd: number };
+  const holdings: Holding[] = [];
+  let totalUsd = 0;
+  const errors: string[] = [];
+
+  for (const chain of chains) {
+    try {
+      const raw = await positions(name, { mode: "simple", chain });
+      const items: any[] = raw?.positions ?? raw?.data ?? [];
+      for (const item of items) {
+        const symbol = (item?.symbol ?? item?.fungible?.symbol ?? "").toUpperCase();
+        if (!symbol) continue;
+        const usd = Number(item?.value ?? item?.value_usd ?? 0);
+        if (!Number.isFinite(usd) || usd <= 0) continue;
+        holdings.push({ symbol, chain, usd });
+        totalUsd += usd;
+      }
+    } catch (e: any) {
+      errors.push(`${chain}: ${e.message}`);
+    }
+  }
+
+  holdings.sort((a, b) => b.usd - a.usd);
+  return c.json({
+    wallet: name,
+    totalUsd: Math.round(totalUsd * 100) / 100,
+    holdings,
+    errors,
+    fetchedAt: new Date().toISOString(),
+  });
+});
+
 api.get("/agent/policies", async (c) => {
   try {
     return c.json({ policies: await listPolicies() });

@@ -1,9 +1,12 @@
 import { useState } from "react";
-import { LogOut, Plus, Settings as SettingsIcon, Activity } from "lucide-react";
+import { LogOut, Plus, Settings as SettingsIcon, Activity, Wallet as WalletIcon, LayoutGrid } from "lucide-react";
 import type { Basket } from "../api.ts";
 import BasketCard from "./BasketCard.tsx";
 import NewBasketModal from "./NewBasketModal.tsx";
 import SettingsPanel from "./SettingsPanel.tsx";
+import WalletView from "./WalletView.tsx";
+
+type Tab = "baskets" | "wallet";
 
 interface Props {
   baskets: Basket[] | null;
@@ -15,6 +18,7 @@ interface Props {
 export default function Dashboard({ baskets, lastEvent, onRefresh, onLogout }: Props) {
   const [showNew, setShowNew] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [tab, setTab] = useState<Tab>("baskets");
 
   return (
     <div className="min-h-full">
@@ -52,44 +56,86 @@ export default function Dashboard({ baskets, lastEvent, onRefresh, onLogout }: P
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-6 py-8">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-semibold">Baskets</h2>
-          <button
-            onClick={() => setShowNew(true)}
-            className="bg-accent hover:bg-accent-dim text-white text-sm font-medium rounded-lg px-3 py-2 flex items-center gap-2 transition"
-          >
-            <Plus className="w-4 h-4" /> New basket
-          </button>
+      <div className="border-b border-ink-700">
+        <div className="max-w-6xl mx-auto px-6 flex gap-1">
+          <TabButton active={tab === "baskets"} onClick={() => setTab("baskets")} icon={<LayoutGrid className="w-4 h-4" />}>
+            Baskets
+          </TabButton>
+          <TabButton active={tab === "wallet"} onClick={() => setTab("wallet")} icon={<WalletIcon className="w-4 h-4" />}>
+            Wallet
+          </TabButton>
         </div>
+      </div>
 
-        {baskets === null ? (
-          <div className="text-ink-400">Loading…</div>
-        ) : baskets.length === 0 ? (
-          <div className="border border-dashed border-ink-600 rounded-xl p-12 text-center">
-            <div className="text-ink-300 mb-2">No baskets yet</div>
-            <p className="text-sm text-ink-400 max-w-md mx-auto mb-4">
-              A basket holds the tokens you want auto-rebalanced. The bot will hold initial weights you set,
-              then nudge them every hour based on TA signals — within your policy limits.
-            </p>
-            <button
-              onClick={() => setShowNew(true)}
-              className="bg-accent hover:bg-accent-dim text-white text-sm font-medium rounded-lg px-4 py-2"
-            >
-              Create your first basket
-            </button>
-          </div>
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2">
-            {baskets.map((b) => (
-              <BasketCard key={b.id} basket={b} onChange={onRefresh} />
-            ))}
-          </div>
+      <main className="max-w-6xl mx-auto px-6 py-8">
+        {tab === "baskets" && (
+          <>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-semibold">Baskets</h2>
+              <button
+                onClick={() => setShowNew(true)}
+                className="bg-accent hover:bg-accent-dim text-white text-sm font-medium rounded-lg px-3 py-2 flex items-center gap-2 transition"
+              >
+                <Plus className="w-4 h-4" /> New basket
+              </button>
+            </div>
+
+            {baskets === null ? (
+              <div className="text-ink-400">Loading…</div>
+            ) : baskets.length === 0 ? (
+              <div className="border border-dashed border-ink-600 rounded-xl p-12 text-center">
+                <div className="text-ink-300 mb-2">No baskets yet</div>
+                <p className="text-sm text-ink-400 max-w-md mx-auto mb-4">
+                  A basket holds the tokens you want auto-rebalanced. The bot will hold initial weights you set,
+                  then nudge them every hour based on TA signals — within your policy limits.
+                </p>
+                <button
+                  onClick={() => setShowNew(true)}
+                  className="bg-accent hover:bg-accent-dim text-white text-sm font-medium rounded-lg px-4 py-2"
+                >
+                  Create your first basket
+                </button>
+              </div>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2">
+                {baskets.map((b) => (
+                  <BasketCard key={b.id} basket={b} onChange={onRefresh} />
+                ))}
+              </div>
+            )}
+          </>
         )}
+
+        {tab === "wallet" && <WalletView />}
       </main>
 
       {showNew && <NewBasketModal onClose={() => setShowNew(false)} onCreated={() => { setShowNew(false); onRefresh(); }} />}
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
     </div>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  icon,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-2 px-4 py-3 text-sm border-b-2 transition ${
+        active
+          ? "border-accent text-white"
+          : "border-transparent text-ink-400 hover:text-ink-200"
+      }`}
+    >
+      {icon} {children}
+    </button>
   );
 }

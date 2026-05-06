@@ -65,6 +65,14 @@ export const api = {
     request<{ portfolio: Portfolio }>(`/baskets/${id}/portfolio`),
   listTokens: (chain: "base" | "solana") => request<{ tokens: TokenEntry[] }>(`/tokens?chain=${chain}`),
   listWallets: () => request<{ wallets: WalletInfo[] }>("/wallets"),
+  walletHoldings: (name: string) =>
+    request<{
+      wallet: string;
+      totalUsd: number;
+      holdings: Array<{ symbol: string; chain: Chain; usd: number }>;
+      errors: string[];
+      fetchedAt: string;
+    }>(`/wallets/${encodeURIComponent(name)}/holdings`),
   listPolicies: () => request<{ policies: any[] }>("/agent/policies"),
   listAgentTokens: () => request<{ tokens: any[] }>("/agent/tokens"),
   pairTelegram: () => request<{ pairingCode: string; expiresIn: string }>("/telegram/pair", { method: "POST" }),

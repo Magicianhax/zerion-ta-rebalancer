@@ -7,6 +7,7 @@ export default function BasketCard({ basket, onChange }: { basket: Basket; onCha
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [refreshingBalance, setRefreshingBalance] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -14,13 +15,17 @@ export default function BasketCard({ basket, onChange }: { basket: Basket; onCha
     return () => { alive = false; };
   }, [basket.id]);
 
-  useEffect(() => {
-    let alive = true;
-    const fetch = () => api.getPortfolio(basket.id).then((r) => alive && setPortfolio(r.portfolio)).catch(() => {});
-    fetch();
-    const interval = setInterval(fetch, 30_000);
-    return () => { alive = false; clearInterval(interval); };
-  }, [basket.id]);
+  const refreshBalance = async () => {
+    setRefreshingBalance(true);
+    try {
+      const r = await api.getPortfolio(basket.id);
+      setPortfolio(r.portfolio);
+    } catch { /* ignore */ }
+    finally { setRefreshingBalance(false); }
+  };
+
+  // Fetch once on mount; subsequent refreshes are manual.
+  useEffect(() => { refreshBalance(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [basket.id]);
 
   const last = history?.[0];
 
@@ -60,17 +65,25 @@ export default function BasketCard({ basket, onChange }: { basket: Basket; onCha
           </div>
         </div>
 
-        {portfolio && (
-          <div className="mb-3 flex items-center justify-between text-xs bg-ink-900/40 border border-ink-700 rounded-lg px-3 py-2">
-            <div className="flex items-center gap-2 text-ink-400">
-              <Wallet className="w-3.5 h-3.5" />
-              <span>Wallet balance</span>
-            </div>
-            <div className="font-mono text-ink-100">
-              ${portfolio.totalUsd.toFixed(2)}
-            </div>
+        <div className="mb-3 flex items-center justify-between text-xs bg-ink-900/40 border border-ink-700 rounded-lg px-3 py-2">
+          <div className="flex items-center gap-2 text-ink-400">
+            <Wallet className="w-3.5 h-3.5" />
+            <span>Wallet balance</span>
           </div>
-        )}
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-ink-100">
+              {portfolio ? `$${portfolio.totalUsd.toFixed(2)}` : "—"}
+            </span>
+            <button
+              onClick={refreshBalance}
+              disabled={refreshingBalance}
+              className="p-1 hover:bg-ink-700 rounded transition disabled:opacity-50"
+              title="Refresh balance"
+            >
+              <RefreshCw className={`w-3 h-3 ${refreshingBalance ? "animate-spin" : ""}`} />
+            </button>
+          </div>
+        </div>
 
         <div className="space-y-1.5">
           {basket.tokens.map((t) => {
