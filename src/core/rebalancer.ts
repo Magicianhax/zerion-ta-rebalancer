@@ -17,7 +17,7 @@ import { findToken } from "./token-registry.ts";
 import { blendWeights, scoresToWeights, scoreToken } from "./ta.ts";
 import { evaluateGuards } from "./policy.ts";
 import { lastRebalanceFor, recordRebalance, getBasket } from "./db.ts";
-import { positions, swap, swapSolana, type SwapArgs } from "./zerion.ts";
+import { invalidatePositionsCache, positions, swap, swapSolana, type SwapArgs } from "./zerion.ts";
 import { summarizePositions as summarizePositionsCore } from "./positions-parser.ts";
 import { config } from "../config.ts";
 import type {
@@ -216,6 +216,9 @@ export async function rebalance(basketId: string): Promise<RebalanceResult> {
         break;
       }
     }
+    // Drop cached positions for this wallet so post-trade balances refresh
+    // on the next dashboard fetch instead of returning a stale 10s view.
+    if (swaps.some((s) => s.txHash)) invalidatePositionsCache(basket.walletName);
   }
 
   const result: RebalanceResult = {

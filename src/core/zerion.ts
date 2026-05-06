@@ -126,15 +126,61 @@ export interface PositionsOptions {
   chain?: string;
 }
 
+/**
+ * Short-lived positions cache.
+ * Reasoning: each `positions` call spawns a Node subprocess (~1s cold start)
+ * + makes a Zerion API roundtrip (~1-2s). When the dashboard renders, the
+ * stats strip, basket cards, and wallet view all want the same data within a
+ * few-hundred-millisecond window. A 10s TTL collapses those bursts into one
+ * subprocess and dedupes concurrent in-flight calls. After a swap fires, the
+ * caller invalidates explicitly via `invalidatePositionsCache(walletName)`.
+ */
+interface CacheEntry {
+  promise: Promise<any>;
+  expiresAt: number;
+}
+const POSITIONS_CACHE = new Map<string, CacheEntry>();
+const POSITIONS_TTL_MS = 10_000;
+
+function positionsCacheKey(walletName: string, opts: PositionsOptions): string {
+  return `${walletName}|${opts.mode ?? "simple"}|${opts.chain ?? "default"}`;
+}
+
+export function invalidatePositionsCache(walletName?: string): void {
+  if (!walletName) {
+    POSITIONS_CACHE.clear();
+    return;
+  }
+  for (const key of POSITIONS_CACHE.keys()) {
+    if (key.startsWith(`${walletName}|`)) POSITIONS_CACHE.delete(key);
+  }
+}
+
 export async function positions(
   walletName: string,
   options: PositionsOptions | "all" | "simple" | "defi" = {},
 ): Promise<any> {
   const opts: PositionsOptions =
     typeof options === "string" ? { mode: options } : options;
+
+  const key = positionsCacheKey(walletName, opts);
+  const now = Date.now();
+  const cached = POSITIONS_CACHE.get(key);
+  if (cached && cached.expiresAt > now) {
+    return cached.promise;
+  }
+
   const args = ["positions", "--wallet", walletName, "--positions", opts.mode ?? "simple"];
   if (opts.chain) args.push("--chain", opts.chain);
-  return runZerion(args);
+
+  const promise = runZerion(args);
+  POSITIONS_CACHE.set(key, { promise, expiresAt: now + POSITIONS_TTL_MS });
+
+  // Drop the entry from the cache if the call rejects, so callers can retry
+  // immediately instead of being stuck with a failed cached promise.
+  promise.catch(() => POSITIONS_CACHE.delete(key));
+
+  return promise;
 }
 
 export async function listPolicies(): Promise<any[]> {

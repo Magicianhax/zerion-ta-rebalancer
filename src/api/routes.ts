@@ -186,30 +186,40 @@ api.get("/wallets", async (c) => {
 api.get("/wallets/:name/holdings", async (c) => {
   const name = c.req.param("name");
   const chains: Chain[] = ["solana", "base"];
-  // Aggregate by (chain, symbol) — Zerion returns separate positions for
-  // native + wrapped variants of the same token, but the user thinks of them
-  // as one balance. Sum the USD value into a single row.
   const aggregated = new Map<string, { symbol: string; chain: Chain; usd: number }>();
   let totalUsd = 0;
   const errors: string[] = [];
 
-  for (const chain of chains) {
-    try {
-      const raw = await positions(name, { mode: "simple", chain });
-      const items: any[] = raw?.positions ?? raw?.data ?? [];
-      for (const item of items) {
-        const symbol = (item?.symbol ?? item?.fungible?.symbol ?? "").toUpperCase();
-        if (!symbol) continue;
-        const usd = Number(item?.value ?? item?.value_usd ?? 0);
-        if (!Number.isFinite(usd) || usd <= 0) continue;
-        const key = `${chain}:${symbol}`;
-        const existing = aggregated.get(key);
-        if (existing) existing.usd += usd;
-        else aggregated.set(key, { symbol, chain, usd });
-        totalUsd += usd;
+  // Fire both chains in parallel — each is a separate Zerion CLI subprocess
+  // and each takes 2-5s on cold start, so running them sequentially doubles
+  // the user-visible refresh time for nothing.
+  const results = await Promise.all(
+    chains.map(async (chain) => {
+      try {
+        const raw = await positions(name, { mode: "simple", chain });
+        return { chain, raw, error: null as string | null };
+      } catch (e: any) {
+        return { chain, raw: null, error: e.message };
       }
-    } catch (e: any) {
-      errors.push(`${chain}: ${e.message}`);
+    }),
+  );
+
+  for (const { chain, raw, error } of results) {
+    if (error) {
+      errors.push(`${chain}: ${error}`);
+      continue;
+    }
+    const items: any[] = raw?.positions ?? raw?.data ?? [];
+    for (const item of items) {
+      const symbol = (item?.symbol ?? item?.fungible?.symbol ?? "").toUpperCase();
+      if (!symbol) continue;
+      const usd = Number(item?.value ?? item?.value_usd ?? 0);
+      if (!Number.isFinite(usd) || usd <= 0) continue;
+      const key = `${chain}:${symbol}`;
+      const existing = aggregated.get(key);
+      if (existing) existing.usd += usd;
+      else aggregated.set(key, { symbol, chain, usd });
+      totalUsd += usd;
     }
   }
 
