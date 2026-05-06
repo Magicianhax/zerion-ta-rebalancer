@@ -117,6 +117,17 @@ export async function rebalance(basketId: string): Promise<RebalanceResult> {
   const startedAt = new Date().toISOString();
   events.emit("rebalance:start", { basketId, startedAt });
 
+  /** Bail if the basket was deleted between checks (race during long ticks). */
+  function bailIfDeleted(): boolean {
+    if (!getBasket(basketId)) {
+      process.stderr.write(
+        `[rebalancer] basket "${basketId}" was deleted mid-tick — aborting cleanly.\n`,
+      );
+      return true;
+    }
+    return false;
+  }
+
   // 1. Current portfolio — pass basket.chain so the CLI queries the right
   //    address (EVM by default; Solana wallets need --chain solana)
   const positionsRaw = await positions(basket.walletName, {
@@ -216,7 +227,19 @@ export async function rebalance(basketId: string): Promise<RebalanceResult> {
     startedAt,
     finishedAt: new Date().toISOString(),
   };
-  recordRebalance(result);
+
+  // Persistence is best-effort: if the basket was deleted mid-tick, the
+  // foreign-key insert fails. We log and return the in-memory result so
+  // the caller (cron / agent) can finish gracefully without crashing.
+  if (!bailIfDeleted()) {
+    try {
+      recordRebalance(result);
+    } catch (e: any) {
+      process.stderr.write(
+        `[rebalancer] recordRebalance failed for "${basketId}": ${e.message}\n`,
+      );
+    }
+  }
   events.emit("rebalance:done", result);
   return result;
 }

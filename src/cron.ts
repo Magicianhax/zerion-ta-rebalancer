@@ -8,7 +8,7 @@
 
 import cron from "node-cron";
 import { config } from "./config.ts";
-import { listBaskets } from "./core/db.ts";
+import { getBasket, listBaskets } from "./core/db.ts";
 import { isAgentEnabled, runHourlyTick } from "./agent/index.ts";
 
 export function startCron() {
@@ -24,6 +24,12 @@ export function startCron() {
     );
 
     for (const basket of baskets) {
+      // Re-check between iterations — a long-running tick on basket A could
+      // span a deletion of basket B by the user. Skip cleanly if so.
+      if (!getBasket(basket.id)) {
+        process.stdout.write(`[cron] ${basket.name} → deleted before tick, skipping\n`);
+        continue;
+      }
       try {
         const result = await runHourlyTick(basket);
         const verdict = result.guardOutcome.allow
