@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { X, AlertCircle, Sparkles, Wallet as WalletIcon, ChevronDown, Wand2 } from "lucide-react";
+import { X, AlertCircle, Sparkles, Wallet as WalletIcon, ChevronDown, Wand2, Info } from "lucide-react";
 import { api, type Chain, type TokenEntry, type WalletInfo } from "../api.ts";
 import { fmtUsd } from "../utils/format.ts";
 
@@ -91,10 +91,31 @@ export default function NewBasketModal({ onClose, onCreated }: Props) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [availableUsdc, setAvailableUsdc] = useState<number | null>(null);
+  const [loadingBalance, setLoadingBalance] = useState(false);
 
   useEffect(() => {
     api.listTokens(chain).then((r) => setTokens(r.tokens.filter((t) => !t.isQuote))).catch(() => {});
   }, [chain]);
+
+  // Fetch the user's USDC balance on the selected chain so they know what
+  // they can actually allocate. Refetch when the chain or wallet changes.
+  useEffect(() => {
+    if (!walletName) return;
+    let alive = true;
+    setLoadingBalance(true);
+    api.walletHoldings(walletName)
+      .then((r) => {
+        if (!alive) return;
+        const usdc = r.holdings.find(
+          (h) => h.symbol.toUpperCase() === "USDC" && h.chain === chain,
+        );
+        setAvailableUsdc(usdc?.usd ?? 0);
+      })
+      .catch(() => alive && setAvailableUsdc(null))
+      .finally(() => alive && setLoadingBalance(false));
+    return () => { alive = false; };
+  }, [walletName, chain]);
 
   // Auto-pick the only available wallet/policy/token — common case for personal self-host.
   useEffect(() => {
@@ -220,6 +241,17 @@ export default function NewBasketModal({ onClose, onCreated }: Props) {
             </div>
           </div>
 
+          {/* Helper line — clarifies what we actually swap from */}
+          <div className="flex items-start gap-2 text-xs text-ink-400 bg-ink-900/40 border border-ink-700 rounded-lg px-3 py-2.5 -mt-2">
+            <Info className="w-3.5 h-3.5 mt-0.5 shrink-0 text-accent" />
+            <div className="leading-relaxed">
+              We'll swap from <span className="font-medium text-ink-100">USDC</span> on{" "}
+              <span className="font-medium text-ink-100 capitalize">{chain}</span> into your selected tokens.
+              Make sure the wallet holds USDC plus a small amount of native gas
+              ({chain === "solana" ? "SOL" : "ETH"}).
+            </div>
+          </div>
+
           {/* Templates */}
           <div>
             <div className="flex items-center gap-2 text-xs text-ink-400 mb-2">
@@ -316,7 +348,18 @@ export default function NewBasketModal({ onClose, onCreated }: Props) {
           {/* Budget + TA bias */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="text-xs text-ink-400 block mb-1.5">Initial budget</label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs text-ink-400">USDC to allocate</label>
+                {availableUsdc != null && (
+                  <button
+                    onClick={() => setBudget(Math.max(5, Math.floor(availableUsdc * 100) / 100))}
+                    disabled={availableUsdc < 5}
+                    className="text-[10px] text-accent hover:text-white disabled:opacity-40 transition tabular-nums"
+                  >
+                    Use max
+                  </button>
+                )}
+              </div>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400 text-sm">$</span>
                 <input
@@ -324,8 +367,32 @@ export default function NewBasketModal({ onClose, onCreated }: Props) {
                   value={budget}
                   onChange={(e) => setBudget(Number(e.target.value))}
                   min={5}
-                  className="w-full bg-ink-700 border border-ink-600 rounded-lg pl-7 pr-3 py-2.5 text-sm focus:outline-none focus:border-accent tabular-nums"
+                  step={1}
+                  className={`w-full bg-ink-700 border rounded-lg pl-7 pr-3 py-2.5 text-sm focus:outline-none transition tabular-nums ${
+                    availableUsdc != null && budget > availableUsdc
+                      ? "border-amber-500/50 focus:border-amber-400"
+                      : "border-ink-600 focus:border-accent"
+                  }`}
                 />
+              </div>
+              <div className="text-[11px] mt-1.5 tabular-nums">
+                {loadingBalance ? (
+                  <span className="text-ink-500">Checking balance…</span>
+                ) : availableUsdc == null ? (
+                  <span className="text-ink-500">—</span>
+                ) : availableUsdc < 5 ? (
+                  <span className="text-amber-400 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3" /> Only {fmtUsd(availableUsdc)} USDC on {chain} — fund the wallet first
+                  </span>
+                ) : budget > availableUsdc ? (
+                  <span className="text-amber-400 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3" /> Over balance — only {fmtUsd(availableUsdc)} USDC available
+                  </span>
+                ) : (
+                  <span className="text-ink-400">
+                    {fmtUsd(availableUsdc)} USDC available on {chain}
+                  </span>
+                )}
               </div>
             </div>
             <div>
@@ -338,6 +405,11 @@ export default function NewBasketModal({ onClose, onCreated }: Props) {
                 onChange={(e) => setTaBias(Number(e.target.value))}
                 className="w-full accent-accent mt-2.5"
               />
+              <div className="text-[11px] text-ink-500 mt-1.5">
+                {taBias < 0.3 ? "Hold close to your initial weights"
+                  : taBias > 0.7 ? "Mostly follow TA signals"
+                  : "Balanced between your weights and TA"}
+              </div>
             </div>
           </div>
 
