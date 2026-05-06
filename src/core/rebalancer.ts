@@ -16,9 +16,20 @@ import { EventEmitter } from "node:events";
 import { findToken } from "./token-registry.ts";
 import { blendWeights, scoresToWeights, scoreToken } from "./ta.ts";
 import { evaluateGuards } from "./policy.ts";
-import { lastRebalanceFor, recordRebalance, getBasket } from "./db.ts";
-import { invalidatePositionsCache, positions, swap, swapSolana, type SwapArgs } from "./zerion.ts";
+import { getBasket, lastRebalanceFor, recordRebalance } from "./db.ts";
+import {
+  invalidatePositionsCache,
+  positions,
+  swap,
+  swapSolana,
+  type SwapArgs,
+} from "./zerion.ts";
 import { summarizePositions as summarizePositionsCore } from "./positions-parser.ts";
+import {
+  buildSwapPlan,
+  computeCurrentWeights,
+  type PortfolioSnapshot,
+} from "./rebalance/plan.ts";
 import { config } from "../config.ts";
 import type {
   Basket,
@@ -28,86 +39,28 @@ import type {
   WeightProposal,
 } from "../types.ts";
 
-/** Single shared event bus — SSE and Telegram both subscribe. */
+/** Shared event bus — SSE and Telegram bot both subscribe to rebalance lifecycle. */
 export const events = new EventEmitter();
 
-interface PortfolioSnapshot {
-  totalUsd: number;
-  /** symbol → USD value held */
-  byToken: Record<string, number>;
-}
-
 /**
- * Translate Zerion's positions response into a flat by-symbol USD map.
- * The CLI's positions output shape is documented but loose; we walk fungible
- * positions on the basket's chain only.
+ * Adapt the tolerant positions parser to the rebalancer's snapshot shape and
+ * surface a debug line when Zerion returned positions but none matched the
+ * basket's token set (usually means a token symbol mismatch in the registry).
  */
-function summarizePositions(raw: any, basket: Basket): PortfolioSnapshot {
+function summarizePositions(raw: unknown, basket: Basket): PortfolioSnapshot {
   const result = summarizePositionsCore(raw, basket);
   if (result.rawSymbols.length > 0 && Object.keys(result.byToken).length === 0) {
-    const wanted = basket.tokens.map((t) => t.symbol.toUpperCase());
-    wanted.push(basket.quoteToken.toUpperCase());
+    const wanted = [
+      ...basket.tokens.map((t) => t.symbol.toUpperCase()),
+      basket.quoteToken.toUpperCase(),
+    ];
     process.stderr.write(
       `[rebalancer] positions returned ${result.rawSymbols.length} item(s) but none matched basket "${basket.name}".\n` +
-      `  Wanted:  ${[...new Set(wanted)].sort().join(", ")}\n` +
-      `  Got:     ${[...new Set(result.rawSymbols)].sort().slice(0, 15).join(", ")}\n`,
+      `  Wanted: ${[...new Set(wanted)].sort().join(", ")}\n` +
+      `  Got:    ${[...new Set(result.rawSymbols)].sort().slice(0, 15).join(", ")}\n`,
     );
   }
   return { totalUsd: result.totalUsd, byToken: result.byToken };
-}
-
-function computeCurrentWeights(snapshot: PortfolioSnapshot): Record<string, number> {
-  if (snapshot.totalUsd === 0) return {};
-  const out: Record<string, number> = {};
-  for (const [sym, usd] of Object.entries(snapshot.byToken)) {
-    out[sym] = usd / snapshot.totalUsd;
-  }
-  return out;
-}
-
-function buildSwapPlan(
-  basket: Basket,
-  snapshot: PortfolioSnapshot,
-  targetWeights: Record<string, number>,
-): SwapPlan[] {
-  const plan: SwapPlan[] = [];
-  const total = snapshot.totalUsd;
-  const quote = basket.quoteToken.toUpperCase();
-
-  // Compute USD delta per token
-  const deltas: Array<{ symbol: string; deltaUsd: number }> = [];
-  for (const tok of basket.tokens) {
-    const sym = tok.symbol.toUpperCase();
-    if (sym === quote) continue;
-    const target = (targetWeights[sym] ?? 0) * total;
-    const current = snapshot.byToken[sym] ?? 0;
-    deltas.push({ symbol: sym, deltaUsd: target - current });
-  }
-
-  // Skip dust — < $1 swaps not worth the gas
-  const dustThreshold = 1;
-
-  // Sells first → frees up quote token
-  for (const d of deltas.filter((d) => d.deltaUsd < -dustThreshold)) {
-    plan.push({
-      fromToken: d.symbol,
-      toToken: quote,
-      amountFrom: Math.abs(d.deltaUsd), // approximate — Zerion routes by USD value
-      estimatedUsd: Math.abs(d.deltaUsd),
-    });
-  }
-
-  // Then buys
-  for (const d of deltas.filter((d) => d.deltaUsd > dustThreshold)) {
-    plan.push({
-      fromToken: quote,
-      toToken: d.symbol,
-      amountFrom: d.deltaUsd,
-      estimatedUsd: d.deltaUsd,
-    });
-  }
-
-  return plan;
 }
 
 export async function rebalance(basketId: string): Promise<RebalanceResult> {

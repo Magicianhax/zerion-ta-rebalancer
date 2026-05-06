@@ -14,8 +14,8 @@ import { config } from "../config.ts";
 import {
   consumePairing,
   getBasket,
-  listBaskets,
   getPairedChatIds,
+  listBaskets,
   recordAuthorizedChat,
   setBasketEnabled,
 } from "../core/db.ts";
