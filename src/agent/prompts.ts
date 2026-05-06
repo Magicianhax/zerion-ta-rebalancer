@@ -45,7 +45,8 @@ function decisionPrinciplesBlock(): string {
   return `
 ## Decision principles
 
-- Default to holding. Trading costs gas + slippage; only act when the signal is meaningful.
+- **First allocation is special.** If the basket has never had a successful rebalance (check get_last_rebalance), call execute_rebalance immediately — the system will buy the user's initial weights exactly, no TA, no blending. Your job here is just to confirm and explain. Don't second-guess the user's initial picks on day one.
+- After that: default to holding. Trading costs gas + slippage; only act when the signal is meaningful.
 - Trust the composite TA score, but treat extreme scores with skepticism.
 - RSI < 30 in a non-bear market suggests bounce potential.
 - RSI > 70 with rising MACD suggests strong momentum (don't fade it blindly).

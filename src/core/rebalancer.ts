@@ -131,29 +131,46 @@ export async function rebalance(basketId: string): Promise<RebalanceResult> {
     : { totalUsd: 0, byToken: {} };
   const currentWeights = computeCurrentWeights(snapshot);
 
-  // 2. Score tokens
+  // 2. Decide allocation mode
+  // First allocation = the basket has never had a successful, non-empty
+  // rebalance. In that case we honor the user's initial weights exactly,
+  // skipping TA entirely. TA only kicks in once the basket is established
+  // and the user has signaled (by funding + first allocation) that they
+  // want the algorithm to start adjusting.
+  const lastReal = lastRebalanceFor(basketId);
+  const isFirstAllocation =
+    !lastReal || !lastReal.guardOutcome.allow || lastReal.swaps.length === 0;
+
   const nonQuoteTokens = basket.tokens.filter(
     (t) => t.symbol.toUpperCase() !== basket.quoteToken.toUpperCase()
   );
-  const scores: TokenScore[] = [];
-  for (const t of nonQuoteTokens) {
-    try {
-      scores.push(await scoreToken(basket.chain, t.symbol));
-    } catch (e: any) {
-      process.stderr.write(`scoreToken(${t.symbol}) failed: ${e.message}\n`);
-      scores.push({
-        symbol: t.symbol,
-        score: 50,
-        breakdown: { rsi: 50, macd: 50, ema: 50, volatility: 50, volume: 50 },
-      });
-    }
-  }
-
-  // 3. Target weights
   const initial: Record<string, number> = {};
   for (const t of nonQuoteTokens) initial[t.symbol.toUpperCase()] = t.initialWeight;
-  const taWeights = scoresToWeights(scores);
-  const targetWeights = blendWeights(initial, taWeights, basket.taBias);
+
+  let scores: TokenScore[] = [];
+  let targetWeights: Record<string, number>;
+
+  if (isFirstAllocation) {
+    targetWeights = initial;
+    process.stdout.write(
+      `[rebalancer] ${basket.name}: first allocation — buying user's initial weights, skipping TA.\n`,
+    );
+  } else {
+    for (const t of nonQuoteTokens) {
+      try {
+        scores.push(await scoreToken(basket.chain, t.symbol));
+      } catch (e: any) {
+        process.stderr.write(`scoreToken(${t.symbol}) failed: ${e.message}\n`);
+        scores.push({
+          symbol: t.symbol,
+          score: 50,
+          breakdown: { rsi: 50, macd: 50, ema: 50, volatility: 50, volume: 50 },
+        });
+      }
+    }
+    const taWeights = scoresToWeights(scores);
+    targetWeights = blendWeights(initial, taWeights, basket.taBias);
+  }
 
   const proposal: WeightProposal = {
     basketId,
