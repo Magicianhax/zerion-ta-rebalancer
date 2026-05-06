@@ -189,8 +189,26 @@ const executeRebalanceTool = tool(
     basketId: z.string().describe("The basket id"),
   },
   async ({ basketId }) => {
-    const result = await rebalance(basketId);
-    return jsonResult(summariseRebalance(result));
+    // If the underlying basket disappears between read and write, return a
+    // structured error rather than throwing — the agent's narration is more
+    // honest with explicit signals than with a stack-trace it has to guess at.
+    if (!getBasket(basketId)) {
+      return jsonResult({
+        ok: false,
+        error: "basket_not_found",
+        message: `Basket "${basketId}" no longer exists. The user may have deleted it.`,
+      });
+    }
+    try {
+      const result = await rebalance(basketId);
+      return jsonResult({ ok: true, ...summariseRebalance(result) });
+    } catch (e: any) {
+      return jsonResult({
+        ok: false,
+        error: "rebalance_failed",
+        message: e.message ?? String(e),
+      });
+    }
   },
 );
 
@@ -202,8 +220,15 @@ const setBasketEnabledTool = tool(
     enabled: z.boolean().describe("True to resume, false to pause"),
   },
   async ({ basketId, enabled }) => {
+    if (!getBasket(basketId)) {
+      return jsonResult({
+        ok: false,
+        error: "basket_not_found",
+        message: `Basket "${basketId}" no longer exists.`,
+      });
+    }
     setBasketEnabled(basketId, enabled);
-    return jsonResult({ basketId, enabled });
+    return jsonResult({ ok: true, basketId, enabled });
   },
 );
 
