@@ -204,13 +204,17 @@ export async function startBot() {
 
   // Plain-text messages (non-commands) → route to the Claude agent.
   // Long-running tool calls can take 10-30s, so show typing indicator.
+  //
+  // Replies go out as plain text, not Markdown — the agent's free-form output
+  // (paths, error messages, code snippets) commonly contains underscores,
+  // brackets, and asterisks that break Telegram's Markdown parser.
   bot.on("message:text", async (ctx) => {
     if (ctx.message.text.startsWith("/")) return;
     const chatId = String(ctx.chat.id);
     try {
       await ctx.api.sendChatAction(ctx.chat.id, "typing");
       const reply = await handleChatMessage(chatId, ctx.message.text);
-      await ctx.reply(reply, { parse_mode: "Markdown" });
+      await ctx.reply(reply);
     } catch (e: any) {
       process.stderr.write(`bot text handler error: ${e.message}\n`);
       await ctx.reply(`Hit an error: ${e.message}`);
@@ -224,8 +228,15 @@ export async function startBot() {
     for (const chatId of chats) {
       try {
         await bot.api.sendMessage(chatId, message, { parse_mode: "Markdown" });
-      } catch (e: any) {
-        process.stderr.write(`telegram push to ${chatId} failed: ${e.message}\n`);
+      } catch {
+        // Markdown parse error fallback — retry as plain text. The
+        // formatter escapes most characters but agent reasoning can still
+        // sneak in quirks; better to deliver an unstyled message than fail.
+        try {
+          await bot.api.sendMessage(chatId, message);
+        } catch (e2: any) {
+          process.stderr.write(`telegram push to ${chatId} failed: ${e2.message}\n`);
+        }
       }
     }
   });
