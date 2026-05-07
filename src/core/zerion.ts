@@ -48,7 +48,14 @@ export function runZerion(args: string[], options: RunOptions = {}): Promise<any
     let stderr = "";
     const timeout = setTimeout(() => {
       child.kill("SIGKILL");
-      reject(makeError("timeout", `Zerion CLI timed out after ${options.timeoutMs ?? DEFAULT_TIMEOUT_MS}ms`));
+      const ms = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+      reject(
+        makeError(
+          "timeout",
+          `Zerion CLI timed out after ${ms}ms. The on-chain transaction may still ` +
+          `have landed — check the wallet's recent activity on the explorer before retrying.`,
+        ),
+      );
     }, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
 
     child.stdout.on("data", (chunk) => (stdout += chunk.toString("utf8")));
@@ -230,6 +237,18 @@ export interface SwapArgs {
   slippage?: number;
 }
 
+/**
+ * Swap timeout — must accommodate the slow Node ESM startup on /mnt/d
+ * (~30s for OWS module resolution), Zerion API quote (~2-5s), Solana sign
+ * + broadcast (~5-15s), and the on-chain confirmation poll (up to ~30s).
+ * Total realistic worst case is ~80s; budgeting 3 minutes leaves headroom.
+ *
+ * If the timeout fires, the swap may have still landed on-chain — we just
+ * lost the response. The caller should treat this as 'unknown' and check
+ * the wallet's tx history before retrying with the same amount.
+ */
+const SWAP_TIMEOUT_MS = 180_000;
+
 export async function swap(args: SwapArgs): Promise<any> {
   const cliArgs = [
     "swap",
@@ -240,7 +259,7 @@ export async function swap(args: SwapArgs): Promise<any> {
     "--wallet", args.walletName,
   ];
   if (args.slippage != null) cliArgs.push("--slippage", String(args.slippage));
-  return runZerion(cliArgs);
+  return runZerion(cliArgs, { timeoutMs: SWAP_TIMEOUT_MS });
 }
 
 export interface SolanaSwapArgs {
@@ -261,7 +280,7 @@ export async function swapSolana(args: SolanaSwapArgs): Promise<any> {
     "--wallet", args.walletName,
   ];
   if (args.slippage != null) cliArgs.push("--slippage", String(args.slippage));
-  return runZerion(cliArgs);
+  return runZerion(cliArgs, { timeoutMs: SWAP_TIMEOUT_MS });
 }
 
 /**
