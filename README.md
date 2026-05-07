@@ -2,9 +2,21 @@
 
 **Self-hosted, policy-bounded crypto portfolio rebalancer. Runs on your laptop or VPS. Talks to you in plain English.**
 
-Set up a basket of tokens once. The rebalancer holds them at the weights you set, and every hour quietly nudges allocations based on technical signals — RSI, MACD, EMA, volume, volatility. You can ask it questions, pause it, override it. It cannot lose your funds outside the limits you set, because the wallet itself refuses to sign anything outside your policy.
+Set up a basket of tokens once. The rebalancer holds them at the weights you set, and every hour quietly nudges allocations based on technical signals — RSI, MACD, EMA, ATR, volume. You can ask it questions, pause it, override it. It cannot lose your funds outside the limits you set, because the wallet itself refuses to sign anything outside your policy.
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Self-hosted](https://img.shields.io/badge/self--hosted-100%25-green) ![No SaaS](https://img.shields.io/badge/no%20SaaS-no%20fees-blueviolet)
+
+---
+
+## Screens
+
+| Dashboard home — stats strip + baskets list | Expanded basket — TA scores, allocation donut, live OWS policy |
+|:---:|:---:|
+| ![Dashboard home](./docs/screenshots/home.png) | ![Expanded basket card](./docs/screenshots/basket.png) |
+
+| Activity — every tick with TA scores + tx hashes | Settings — Telegram, agent, environment, policies |
+|:---:|:---:|
+| ![Activity tab](./docs/screenshots/activity.png) | ![Settings tab](./docs/screenshots/settings.png) |
 
 ---
 
@@ -13,7 +25,7 @@ Set up a basket of tokens once. The rebalancer holds them at the weights you set
 Most "auto-rebalancing" tools are custodial — you give a company control of your funds. This is the opposite:
 
 - **Your keys, your machine.** The wallet's encrypted keystore lives on your hard drive (or VPS). No third-party custody.
-- **The bot can't go rogue.** Even if the rebalancer code is hacked tomorrow, the agent token can only do what the wallet's policy allows. Wrong chain → refused. Send transfer → refused. Over the daily transaction cap → refused.
+- **The bot can't go rogue.** Even if the rebalancer code is hacked tomorrow, the agent token can only do what the wallet's policy allows. Wrong chain → refused. Native transfer → refused. Over the daily transaction cap → refused.
 - **No subscription, no fees beyond gas.** Self-host, free forever. (Zerion's API has a free tier; the rest is your laptop's electricity.)
 - **Real transparency.** Read the source. Watch the cron tick. Ask the agent why it did what it did. No black box.
 
@@ -31,8 +43,18 @@ Most "auto-rebalancing" tools are custodial — you give a company control of yo
 1. **Setup wizard** runs once. Creates an encrypted wallet, mints a scoped agent token, attaches a tight policy (chain-locked, no transfers, no approvals, daily transaction cap).
 2. **You fund the wallet** with a small amount of USDC + native gas.
 3. **You define a basket** in the web dashboard: which tokens, what initial weights, how much to follow TA vs your bias.
-4. **Cron fires every hour.** The rebalancer fetches OHLCV from GeckoTerminal, computes a composite TA score per token, proposes new weights, runs guard checks, and routes any approved swaps through the Zerion API. The Claude agent narrates each decision in plain English.
-5. **You watch it work** in the web dashboard or chat with it on Telegram.
+4. **First allocation fires immediately.** The dashboard streams a staged animation (queued → quoting → signing → swapping → settling → done) as the basket fills up.
+5. **Cron fires every hour after.** The rebalancer fetches OHLCV from GeckoTerminal, computes a composite TA score per token, proposes new weights, runs guard checks, and routes any approved swaps through the Zerion API. The Claude agent narrates each decision in plain English.
+6. **You watch it work** in the web dashboard or chat with it on Telegram.
+
+## What's in the box
+
+- **Web dashboard** with a Bloomberg-terminal-density layout: top stats strip, expanded basket cards (token table, allocation donut, guards, live policy panel), per-tab Wallet / Activity / Settings.
+- **Telegram bot** — push notifications + free-form chat backed by the Claude Agent SDK with read-only tools.
+- **Hourly cron** — every basket gets a tick. Decisions are logged to SQLite with full TA scores and tx hashes.
+- **Curated token registry** — 17 Solana defaults (SOL/JUP/JTO/WIF/BONK/PYTH/RAY/ORCA/JITOSOL/MSOL/W/DRIFT/TNSR/HNT/POPCAT/MEW/PUMP/PENGU/FARTCOIN) and 11 Base defaults (ETH/AERO/DEGEN/BRETT/CBBTC/VIRTUAL/TOSHI/HIGHER/KEYCAT/MOG/PRIME).
+- **Custom tokens** — paste any Solana mint or Base contract address; resolves symbol, decimals, and the deepest USDC pool from GeckoTerminal, persists for future baskets.
+- **Live policy display** — the dashboard reads each basket's actual rules from your local OWS keystore (chain lock, expiry, daily spend cap, attached scripts). Not the app's *view* of the policy — the rules the keystore will actually enforce.
 
 ## Three layers of policy — why it's safe
 
@@ -88,6 +110,8 @@ npm install --legacy-peer-deps
 npm run build
 ```
 
+> **Note on `--legacy-peer-deps`:** the Claude Agent SDK declares `zod ^4` as a peer dependency, but our API routes use `zod 3` syntax. The SDK works fine on `zod 3` at runtime; we ship a project-level `.npmrc` so the flag is permanent.
+
 ### Run the setup wizard
 
 One-time step that creates your wallet, policy, and agent token:
@@ -134,7 +158,7 @@ Zerion TA Rebalancer ready
 
 ### Use it
 
-**Web dashboard** — open `http://localhost:3000`, log in with `ADMIN_PASSWORD`. Click **New basket**, walk the 3-step form, hit **Rebalance now**.
+**Web dashboard** — open `http://localhost:3000` (or whatever `PORT` you set), log in with `ADMIN_PASSWORD`. Click **New basket**, walk the form, hit **Create & allocate**. Watch the staged "first allocation in flight" toast as the basket fills up.
 
 **Telegram** — open the chat with your bot:
 
@@ -178,12 +202,12 @@ docker run -d \
   --restart unless-stopped \
   -p 3000:3000 \
   -v $(pwd)/data:/app/data \
-  -v $HOME/.zerion:/root/.zerion \
+  -v $HOME/.ows:/root/.ows \
   --env-file .env \
   zerion-rebalancer
 ```
 
-Mount `~/.zerion` so your wallet keystore survives container restarts. Mount `./data` for the SQLite database.
+Mount `~/.ows/` so your wallet keystore + policy scripts survive container restarts. Mount `./data` for the SQLite database.
 
 **Process supervision** — for systemd or PM2 setups, the binary runs in foreground and handles SIGINT/SIGTERM cleanly. No special flags needed.
 
@@ -196,13 +220,16 @@ Mount `~/.zerion` so your wallet keystore survives container restarts. Mount `./
 | `ANTHROPIC_API_KEY` | empty | no | Set to use direct API billing. Empty + Claude Code logged in = subscription billing. |
 | `ANTHROPIC_MODEL` | `claude-sonnet-4-6` | no | `claude-opus-4-7` for max intelligence; `claude-haiku-4-5` for cheap chat |
 | `TELEGRAM_BOT_TOKEN` | empty | no | Disables bot if empty |
+| `TELEGRAM_AUTHORIZED_USER_IDS` | empty | no | Comma-separated user IDs. Empty = bot answers no one. |
 | `REBALANCE_CRON` | `0 * * * *` | no | Standard cron syntax. Top of every hour by default. |
 | `MAX_DRIFT_PERCENT` | 10 | no | App-layer churn guard. Skipped on first allocation. |
 | `REBALANCE_COOLDOWN_MINUTES` | 45 | no | Between rebalances on the same basket |
-| `DEFAULT_SLIPPAGE` | 2 | no | Percent. Failed swaps log to stderr and continue. |
+| `DEFAULT_SLIPPAGE` | 2 | no | Percent. Failed swaps log to stderr; the rest of the plan still runs. |
 | `DEFAULT_CHAIN` | `solana` | no | New baskets default to this chain |
 | `PORT` | 3000 | no | Web server port |
 | `ZERION_CLI_PATH` | `../zerion-ai/cli/zerion.js` | no | Path to the forked CLI |
+
+Full inline annotations in [.env.example](./.env.example).
 
 ## What's under the hood
 
@@ -222,10 +249,11 @@ Mount `~/.zerion` so your wallet keystore survives container restarts. Mount `./
 │   src/core/      ta, ohlcv, rebalancer, zerion subprocess     │
 │   src/api/       Hono routes + SSE                            │
 │   web/           Vite + React + Tailwind dashboard            │
-│   scripts/       setup wizard                                 │
+│   scripts/       setup wizard + sync helper                   │
 │                                                                │
-│   data/rebalancer.db    SQLite (baskets, rebalances, chats)   │
-│   ~/.zerion/            OWS keystore (encrypted wallet)       │
+│   data/rebalancer.db    SQLite (baskets, rebalances, custom   │
+│                          tokens, telegram pairings, chats)    │
+│   ~/.ows/               OWS keystore + policy scripts          │
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -245,16 +273,18 @@ Full details in [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 | Symptom | Fix |
 |---|---|
 | `vite: not found` on `npm run build` | `npm run install:web` first, or use the combined `npm run build` |
-| `claude: command not found` | The Claude Agent SDK spawns the `claude` CLI as a subprocess. Install + login: `npm install -g @anthropic-ai/claude-code` then `claude login`. Restart `npm start` after. |
+| `claude: command not found` or "Claude Code native binary not found" | The Claude Agent SDK spawns the `claude` CLI as a subprocess. Install + login: `npm install -g @anthropic-ai/claude-code` then `claude login`. The app auto-detects the global `claude` binary on boot. |
 | Telegram bot says "Chat is disabled" or agent never narrates rebalances | Either `ANTHROPIC_API_KEY` is unset *and* Claude Code isn't logged in, or the `claude` CLI isn't on PATH. Run `claude --version` to verify; install + log in if needed. |
 | `Policy script outside allowed directory` after moving the project | OWS policies store absolute paths to `.mjs` scripts. After moving, run `find ~/.ows/policies -type f -name '*.json' -exec sed -i 's\|<old-path>\|<new-path>\|g' {} +`, or recreate the policy via `npm run setup`. |
 | `Cannot find module '@open-wallet-standard/core-linux-x64-gnu'` | Reinstall after switching to WSL: `rm -rf node_modules && npm install --legacy-peer-deps` |
 | `missing_api_key` from a direct `zerion ...` command | Restart `npm start` once — it auto-syncs `ZERION_API_KEY` into Zerion's config |
 | Wallet balance shows $0 in UI/bot | Ensure your basket's chain matches where you funded. Solana wallets need `--chain solana` (the rebalancer does this automatically; if you're testing direct CLI, add `--chain solana`). |
+| `GeckoTerminal returned 429` repeatedly in cron logs | Built-in 15-min cache + 2.1s throttle should keep you under the free-tier limit. If it persists, your token may have a bad pool address — re-add it via the "Custom" input in New Basket so the address is auto-resolved. |
+| `Insufficient USDC balance for this swap` | Plan integrity caps buys at current USDC + planned sells (×0.995 haircut), so this should not happen on a properly-funded basket. If you see it, top up USDC. |
 | Drift guard rejected first rebalance | Should be auto-skipped on first allocation. If you hit it, restart the server and retry. |
 | Passphrase prompt looks corrupted in WSL terminal | Use Windows Terminal or a regular terminal emulator instead of VS Code's integrated terminal |
 | Swap failed with insufficient gas | Top up native gas (SOL on Solana, ETH on Base). Each swap costs ~0.001-0.002 SOL or a few cents in ETH. |
-| Tokens missing from the New Basket form | Add them to `src/core/token-registry.ts` with their address + a high-liquidity USDC pool address |
+| Tokens missing from the New Basket form | Use the "Custom" input at the bottom of the token grid — paste any Solana mint or Base contract address. Persists across restarts. Or add to `src/core/token-registry.ts` and rebuild for permanent default presence. |
 
 ## FAQ
 
@@ -271,7 +301,7 @@ Yes. Leave `ANTHROPIC_API_KEY` empty and don't sign into Claude Code. The cron s
 Solana and Base in v1. The Zerion CLI supports 60+ EVM chains; adding more is a matter of editing `src/core/token-registry.ts` to map symbols to pool addresses on that chain. Cross-chain rebalancing (a basket spanning Solana + Base) is not implemented in v1.
 
 **What tokens?**
-The shipped registry includes the most liquid tokens on each chain (SOL, BONK, JUP, WIF, JTO on Solana; ETH, AERO, DEGEN, BRETT, cbBTC on Base). Adding a new token = one entry in `src/core/token-registry.ts` with its address and main USDC pool.
+17 Solana defaults: SOL, JUP, JTO, WIF, BONK, PYTH, RAY, ORCA, JITOSOL, MSOL, W, DRIFT, TNSR, HNT, POPCAT, MEW, PUMP, PENGU, FARTCOIN. 11 Base defaults: ETH, AERO, DEGEN, BRETT, CBBTC, VIRTUAL, TOSHI, HIGHER, KEYCAT, MOG, PRIME. Anything not in the list — paste its contract address into the "Custom" input in New Basket; the resolver auto-pulls metadata + the deepest USDC pool from GeckoTerminal.
 
 **How do I extend it?**
 - New TA indicator: add to `src/core/ta.ts` and adjust the weights map
@@ -315,5 +345,5 @@ Built on top of:
 - [Zerion CLI](https://github.com/zeriontech/zerion-ai) — wallet + execution layer
 - [Open Wallet Standard](https://github.com/open-wallet-standard/core) — wallet encryption + policy enforcement
 - [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-typescript) — reasoning agent
-- [GeckoTerminal](https://www.geckoterminal.com) — OHLCV data
+- [GeckoTerminal](https://www.geckoterminal.com) — OHLCV + token resolution
 - [Hono](https://hono.dev) · [grammy](https://grammy.dev) · [Vite](https://vitejs.dev) · [Tailwind](https://tailwindcss.com) · [technicalindicators](https://github.com/anandanand84/technicalindicators)
