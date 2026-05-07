@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   LogOut,
   Plus,
@@ -8,7 +8,7 @@ import {
   LayoutGrid,
   Briefcase,
 } from "lucide-react";
-import { api, type Basket } from "../api.ts";
+import { api, type Basket, type Portfolio, type RebalanceResult } from "../api.ts";
 import BasketCard from "./BasketCard.tsx";
 import NewBasketModal from "./NewBasketModal.tsx";
 import SettingsPanel from "./SettingsPanel.tsx";
@@ -30,6 +30,43 @@ export default function Dashboard({ baskets, lastEvent, onRefresh, onLogout }: P
   const [showNew, setShowNew] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [tab, setTab] = useState<Tab>("baskets");
+
+  // ── Per-basket data lifted to parent ──────────────────────────────
+  // Both StatsStrip (for aggregate stats) and BasketCard (for per-card
+  // display) need the same per-basket portfolio + rebalance history.
+  // Fetching from each component caused duplicate network calls on every
+  // mount. Lifting here means one fetch per basket per dependency change.
+  const [portfolios, setPortfolios] = useState<Record<string, Portfolio>>({});
+  const [rebalanceHistories, setRebalanceHistories] = useState<Record<string, RebalanceResult[]>>({});
+
+  const refreshBasketData = async (basketId: string) => {
+    const [pf, rb] = await Promise.all([
+      api.getPortfolio(basketId).catch(() => null),
+      api.listRebalances(basketId, 50).catch(() => null),
+    ]);
+    if (pf) setPortfolios((prev) => ({ ...prev, [basketId]: pf.portfolio }));
+    if (rb) setRebalanceHistories((prev) => ({ ...prev, [basketId]: rb.rebalances }));
+  };
+
+  // Fetch on basket list change (initial load, basket created/deleted).
+  // The cache in api.ts dedupes if the same basket data was already fetched
+  // within the TTL window, so this is cheap on re-renders.
+  const basketIdsKey = useMemo(() => baskets?.map((b) => b.id).join(",") ?? "", [baskets]);
+  useEffect(() => {
+    if (!baskets) return;
+    for (const b of baskets) refreshBasketData(b.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [basketIdsKey]);
+
+  // SSE rebalance:done events arrive with the basket id — refresh just
+  // that basket's data so the dashboard reflects post-trade balances.
+  useEffect(() => {
+    if (lastEvent?.type === "rebalance:done") {
+      const basketId = (lastEvent.payload as { basketId?: string })?.basketId;
+      if (basketId) refreshBasketData(basketId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastEvent]);
 
   // Wallet data lifted to parent so tab switches don't refetch.
   const [wallets, setWallets] = useState<WalletData[] | null>(null);
@@ -175,7 +212,13 @@ export default function Dashboard({ baskets, lastEvent, onRefresh, onLogout }: P
       <main className="flex-1 max-w-5xl mx-auto px-6 py-8 w-full">
         {tab === "baskets" && (
           <>
-            {baskets && baskets.length > 0 && <StatsStrip baskets={baskets} />}
+            {baskets && baskets.length > 0 && (
+              <StatsStrip
+                baskets={baskets}
+                portfolios={portfolios}
+                rebalanceHistories={rebalanceHistories}
+              />
+            )}
 
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-semibold">Baskets</h2>
@@ -203,7 +246,14 @@ export default function Dashboard({ baskets, lastEvent, onRefresh, onLogout }: P
             ) : (
               <div className="grid gap-4 md:grid-cols-2">
                 {baskets.map((b) => (
-                  <BasketCard key={b.id} basket={b} onChange={onRefresh} />
+                  <BasketCard
+                    key={b.id}
+                    basket={b}
+                    portfolio={portfolios[b.id]}
+                    history={rebalanceHistories[b.id]}
+                    onRefreshBasket={() => refreshBasketData(b.id)}
+                    onChange={onRefresh}
+                  />
                 ))}
               </div>
             )}

@@ -1,39 +1,43 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Pause, Play, RefreshCw, Trash2, ChevronDown, ChevronUp, Wallet } from "lucide-react";
 import { api, type Basket, type Portfolio, type RebalanceResult } from "../api.ts";
 import { fmtUsd, fmtRelative } from "../utils/format.ts";
 
-export default function BasketCard({ basket, onChange }: { basket: Basket; onChange: () => void }) {
-  const [history, setHistory] = useState<RebalanceResult[] | null>(null);
-  const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
+interface Props {
+  basket: Basket;
+  /** Portfolio + history come from the parent so we don't refetch on every mount. */
+  portfolio?: Portfolio;
+  history?: RebalanceResult[];
+  /** Refresh just this basket's portfolio + history (used by the per-card refresh button). */
+  onRefreshBasket: () => Promise<void>;
+  /** Refresh the basket list (called after pause/resume/delete). */
+  onChange: () => void;
+}
+
+export default function BasketCard({ basket, portfolio, history, onRefreshBasket, onChange }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [refreshingBalance, setRefreshingBalance] = useState(false);
 
-  useEffect(() => {
-    let alive = true;
-    api.listRebalances(basket.id, 5).then((r) => alive && setHistory(r.rebalances)).catch(() => {});
-    return () => { alive = false; };
-  }, [basket.id]);
-
   const refreshBalance = async () => {
     setRefreshingBalance(true);
-    try {
-      const r = await api.getPortfolio(basket.id);
-      setPortfolio(r.portfolio);
-    } catch { /* ignore */ }
+    try { await onRefreshBasket(); }
     finally { setRefreshingBalance(false); }
   };
-
-  // Fetch once on mount; subsequent refreshes are manual.
-  useEffect(() => { refreshBalance(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [basket.id]);
 
   const last = history?.[0];
 
   const trigger = async () => {
     setBusy(true);
-    try { await api.rebalance(basket.id); onChange(); } catch (e: any) { alert(e.message); }
-    finally { setBusy(false); }
+    try {
+      await api.rebalance(basket.id);
+      await onRefreshBasket();
+      onChange();
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const togglePause = async () => {
