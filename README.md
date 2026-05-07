@@ -54,11 +54,16 @@ Even if a hacker stole your agent token from disk and replaced our code with the
 
 - **Node.js 22+** ([install via nvm](https://github.com/nvm-sh/nvm))
 - **A Zerion API key** — free tier is enough. Sign up: [dashboard.zerion.io](https://dashboard.zerion.io)
-- **One of:**
-  - **Claude Code subscription** (Pro/Team/Max) — install with `npm install -g @anthropic-ai/claude-code`, then `claude login`. The agent uses your existing plan, no extra cost.
-  - **Anthropic API key** from [console.anthropic.com](https://console.anthropic.com) — direct per-token billing.
-  - **Neither** — agent reasoning is disabled but TA-driven rebalancing still works (cron fires deterministic swaps).
-- **Optional: Telegram bot token** from [@BotFather](https://t.me/BotFather) for chat + push notifications.
+- **One of these for the agent** (chat + reasoning):
+  - **Claude Code subscription** (Pro/Team/Max). The Claude Agent SDK runs as a subprocess of the `claude` CLI and reuses your subscription credentials — no per-token billing. **Two steps required**:
+    ```bash
+    npm install -g @anthropic-ai/claude-code   # installs the `claude` CLI globally
+    claude login                                # signs in with your Pro/Team/Max account
+    ```
+    > Without these, just installing the npm `@anthropic-ai/claude-agent-sdk` package is not enough — the SDK spawns the `claude` CLI to talk to Anthropic, so it must be globally available and logged in.
+  - **Anthropic API key** from [console.anthropic.com](https://console.anthropic.com) — direct per-token billing. Set `ANTHROPIC_API_KEY` in `.env`. No `claude` CLI install needed.
+  - **Neither** — agent reasoning is disabled but TA-driven rebalancing still works (cron fires deterministic swaps; Telegram bot answers `/balance` and `/status` but not natural-language chat).
+- **Optional: Telegram bot token** from [@BotFather](https://t.me/BotFather) for chat + push notifications. Plus your Telegram user ID (find via [@userinfobot](https://t.me/userinfobot)) to put in `TELEGRAM_AUTHORIZED_USER_IDS`.
 
 ### Install
 
@@ -240,7 +245,9 @@ Full details in [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 | Symptom | Fix |
 |---|---|
 | `vite: not found` on `npm run build` | `npm run install:web` first, or use the combined `npm run build` |
-| `claude: command not found` | `npm install -g @anthropic-ai/claude-code` then `claude login` |
+| `claude: command not found` | The Claude Agent SDK spawns the `claude` CLI as a subprocess. Install + login: `npm install -g @anthropic-ai/claude-code` then `claude login`. Restart `npm start` after. |
+| Telegram bot says "Chat is disabled" or agent never narrates rebalances | Either `ANTHROPIC_API_KEY` is unset *and* Claude Code isn't logged in, or the `claude` CLI isn't on PATH. Run `claude --version` to verify; install + log in if needed. |
+| `Policy script outside allowed directory` after moving the project | OWS policies store absolute paths to `.mjs` scripts. After moving, run `find ~/.ows/policies -type f -name '*.json' -exec sed -i 's\|<old-path>\|<new-path>\|g' {} +`, or recreate the policy via `npm run setup`. |
 | `Cannot find module '@open-wallet-standard/core-linux-x64-gnu'` | Reinstall after switching to WSL: `rm -rf node_modules && npm install --legacy-peer-deps` |
 | `missing_api_key` from a direct `zerion ...` command | Restart `npm start` once — it auto-syncs `ZERION_API_KEY` into Zerion's config |
 | Wallet balance shows $0 in UI/bot | Ensure your basket's chain matches where you funded. Solana wallets need `--chain solana` (the rebalancer does this automatically; if you're testing direct CLI, add `--chain solana`). |
