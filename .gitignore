@@ -1,19 +1,40 @@
+# --- Build artifacts ---
 node_modules/
 dist/
 build/
 web/dist/
-data/
-*.log
-.env
-.env.local
-.DS_Store
-.vscode/
-.idea/
 *.tsbuildinfo
 coverage/
 
-# Internal / private — never push these to a public repo
+# --- Runtime / state ---
+data/
+*.log
+
+# --- Secrets / env ---
+.env
+.env.local
+.env.*.local
+
+# --- Editor / OS ---
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- AI tooling (machine-local; should never be in a public repo) ---
+.claude/
+.cursor/
+.continue/
+.aider*
+.tabnine/
+.codeium/
+
+# --- Internal / private notes (the operator's working files) ---
 .submission/
 .notes/
+.private/
 *.private.md
 TODO.private.md
+NOTES.private.md
+SCRATCH.md
