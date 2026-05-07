@@ -40,44 +40,128 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return json as T;
 }
 
+/**
+ * In-flight cache for read-only GETs. Two roles:
+ *  1. Dedupe concurrent calls (modal mounts mid-render and starts 4 parallel
+ *     fetches; the second mount within the TTL hits an already-resolved
+ *     promise instead of issuing a new request).
+ *  2. Short TTL serves as a "don't refetch on every component mount" guard.
+ *     Subprocess-bound endpoints (positions, wallet metadata) take 1-30s
+ *     each — repeating them on every modal open is wasteful.
+ */
+const cacheStore = new Map<string, { promise: Promise<unknown>; expiresAt: number }>();
+
+function cached<T>(key: string, ttlMs: number, factory: () => Promise<T>): Promise<T> {
+  const now = Date.now();
+  const hit = cacheStore.get(key);
+  if (hit && hit.expiresAt > now) return hit.promise as Promise<T>;
+  const promise = factory();
+  cacheStore.set(key, { promise, expiresAt: now + ttlMs });
+  promise.catch(() => cacheStore.delete(key));
+  return promise;
+}
+
+/** Drop cached entries — call after mutations that change the answer. */
+export function invalidateCache(prefix?: string) {
+  if (!prefix) {
+    cacheStore.clear();
+    return;
+  }
+  for (const key of cacheStore.keys()) {
+    if (key.startsWith(prefix)) cacheStore.delete(key);
+  }
+}
+
+const TTL_FOREVER = 1000 * 60 * 60; // 1h — token registry never changes mid-session
+const TTL_LONG = 1000 * 60 * 5;     // 5min — wallets, policies, agent tokens (mutated rarely + we invalidate explicitly)
+const TTL_SHORT = 1000 * 30;        // 30s  — wallet holdings (changes on swaps)
+
 export const api = {
+  // Reads are cached at the client to avoid duplicate fetches when multiple
+  // components mount within milliseconds (e.g. closing/reopening a modal).
+  listBaskets: () =>
+    cached("baskets", TTL_SHORT, () => request<{ baskets: Basket[] }>("/baskets")),
+  getBasket: (id: string) =>
+    cached(`basket:${id}`, TTL_SHORT, () => request<{ basket: Basket }>(`/baskets/${id}`)),
+  listRebalances: (id: string, limit = 50) =>
+    cached(`rebalances:${id}:${limit}`, TTL_SHORT, () =>
+      request<{ rebalances: RebalanceResult[] }>(`/baskets/${id}/rebalances?limit=${limit}`),
+    ),
+  getPortfolio: (id: string) =>
+    cached(`portfolio:${id}`, TTL_SHORT, () =>
+      request<{ portfolio: Portfolio }>(`/baskets/${id}/portfolio`),
+    ),
+  listTokens: (chain: "base" | "solana") =>
+    cached(`tokens:${chain}`, TTL_FOREVER, () =>
+      request<{ tokens: TokenEntry[] }>(`/tokens?chain=${chain}`),
+    ),
+  listWallets: () =>
+    cached("wallets", TTL_LONG, () => request<{ wallets: WalletInfo[] }>("/wallets")),
+  walletHoldings: (name: string) =>
+    cached(`holdings:${name}`, TTL_SHORT, () =>
+      request<{
+        wallet: string;
+        totalUsd: number;
+        holdings: Array<{ symbol: string; chain: Chain; usd: number; logoUrl: string | null }>;
+        errors: string[];
+        fetchedAt: string;
+      }>(`/wallets/${encodeURIComponent(name)}/holdings`),
+    ),
+  listPolicies: () =>
+    cached("policies", TTL_LONG, () => request<{ policies: any[] }>("/agent/policies")),
+  listAgentTokens: () =>
+    cached("agent-tokens", TTL_LONG, () => request<{ tokens: any[] }>("/agent/tokens")),
+  getAuthorizedTelegramUsers: () =>
+    cached("authorized-tg", TTL_LONG, () =>
+      request<{ userIds: string[] }>("/telegram/authorized"),
+    ),
+
+  // Writes — invalidate the relevant cache prefixes after the response.
   health: () => request<{ ok: true; version: string }>("/health"),
   login: (password: string) =>
     request<{ token: string }>("/auth/login", {
       method: "POST",
       body: JSON.stringify({ password }),
     }),
-  listBaskets: () => request<{ baskets: Basket[] }>("/baskets"),
-  getBasket: (id: string) => request<{ basket: Basket }>(`/baskets/${id}`),
-  createBasket: (basket: BasketCreatePayload) =>
-    request<{ basket: Basket }>("/baskets", {
+  createBasket: async (basket: BasketCreatePayload) => {
+    const r = await request<{ basket: Basket }>("/baskets", {
       method: "POST",
       body: JSON.stringify(basket),
-    }),
-  pauseBasket: (id: string) => request<{ ok: true }>(`/baskets/${id}/pause`, { method: "POST" }),
-  resumeBasket: (id: string) => request<{ ok: true }>(`/baskets/${id}/resume`, { method: "POST" }),
-  deleteBasket: (id: string) => request<{ ok: true }>(`/baskets/${id}`, { method: "DELETE" }),
-  rebalance: (id: string) =>
-    request<{ result: RebalanceResult }>(`/baskets/${id}/rebalance`, { method: "POST" }),
-  listRebalances: (id: string, limit = 50) =>
-    request<{ rebalances: RebalanceResult[] }>(`/baskets/${id}/rebalances?limit=${limit}`),
-  getPortfolio: (id: string) =>
-    request<{ portfolio: Portfolio }>(`/baskets/${id}/portfolio`),
-  listTokens: (chain: "base" | "solana") => request<{ tokens: TokenEntry[] }>(`/tokens?chain=${chain}`),
-  listWallets: () => request<{ wallets: WalletInfo[] }>("/wallets"),
-  walletHoldings: (name: string) =>
-    request<{
-      wallet: string;
-      totalUsd: number;
-      holdings: Array<{ symbol: string; chain: Chain; usd: number; logoUrl: string | null }>;
-      errors: string[];
-      fetchedAt: string;
-    }>(`/wallets/${encodeURIComponent(name)}/holdings`),
-  listPolicies: () => request<{ policies: any[] }>("/agent/policies"),
-  listAgentTokens: () => request<{ tokens: any[] }>("/agent/tokens"),
-  pairTelegram: () => request<{ pairingCode: string; expiresIn: string }>("/telegram/pair", { method: "POST" }),
-  getAuthorizedTelegramUsers: () =>
-    request<{ userIds: string[] }>("/telegram/authorized"),
+    });
+    invalidateCache("baskets");
+    return r;
+  },
+  pauseBasket: async (id: string) => {
+    const r = await request<{ ok: true }>(`/baskets/${id}/pause`, { method: "POST" });
+    invalidateCache("baskets");
+    invalidateCache(`basket:${id}`);
+    return r;
+  },
+  resumeBasket: async (id: string) => {
+    const r = await request<{ ok: true }>(`/baskets/${id}/resume`, { method: "POST" });
+    invalidateCache("baskets");
+    invalidateCache(`basket:${id}`);
+    return r;
+  },
+  deleteBasket: async (id: string) => {
+    const r = await request<{ ok: true }>(`/baskets/${id}`, { method: "DELETE" });
+    invalidateCache("baskets");
+    invalidateCache(`basket:${id}`);
+    invalidateCache(`portfolio:${id}`);
+    invalidateCache(`rebalances:${id}`);
+    return r;
+  },
+  rebalance: async (id: string) => {
+    const r = await request<{ result: RebalanceResult }>(`/baskets/${id}/rebalance`, {
+      method: "POST",
+    });
+    invalidateCache(`portfolio:${id}`);
+    invalidateCache(`rebalances:${id}`);
+    invalidateCache(`holdings:`);
+    return r;
+  },
+  pairTelegram: () =>
+    request<{ pairingCode: string; expiresIn: string }>("/telegram/pair", { method: "POST" }),
 };
 
 export function subscribeEvents(
