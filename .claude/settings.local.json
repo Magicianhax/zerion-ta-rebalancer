@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(rsync -a --info=progress2 --exclude='node_modules' --exclude='dist' --exclude='build' --exclude='.next' --exclude='*.log' \"/mnt/d/Tools/zerion CLI/\" ~/zerion-CLI/)",
-      "Bash(npm install *)"
-    ]
-  }
-}
