@@ -223,6 +223,16 @@ export async function listPolicies(): Promise<any[]> {
   return out?.policies ?? [];
 }
 
+/**
+ * Full detail for a single policy — includes config (scripts, daily_tx_limit,
+ * allowed_addresses) which list-policies omits. Used by the dashboard to
+ * render the actual policy rules per basket.
+ */
+export async function showPolicy(id: string): Promise<any | null> {
+  const out = await cachedZerion(`agent:show-policy:${id}`, ["agent", "show-policy", "--id", id]);
+  return out?.policy ?? null;
+}
+
 export async function listAgentTokens(): Promise<any[]> {
   const out = await cachedZerion("agent:list-tokens", ["agent", "list-tokens"]);
   return out?.tokens ?? [];

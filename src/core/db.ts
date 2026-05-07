@@ -59,6 +59,19 @@ const SCHEMA_STATEMENTS: string[] = [
      messages TEXT NOT NULL,
      updated_at TEXT NOT NULL
    )`,
+  `CREATE TABLE IF NOT EXISTS custom_tokens (
+     chain TEXT NOT NULL CHECK (chain IN ('base','solana')),
+     address TEXT NOT NULL,
+     symbol TEXT NOT NULL,
+     name TEXT NOT NULL,
+     decimals INTEGER NOT NULL,
+     pool_address TEXT NOT NULL DEFAULT '',
+     logo_url TEXT,
+     added_at TEXT NOT NULL,
+     PRIMARY KEY (chain, address)
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_custom_tokens_symbol
+     ON custom_tokens(chain, symbol)`,
 ];
 
 export function initDb(): Database.Database {
@@ -271,4 +284,81 @@ export function saveConversation(chatId: string, messages: unknown[]): void {
 
 export function clearConversation(chatId: string): void {
   getDb().prepare(`DELETE FROM conversations WHERE chat_id = ?`).run(chatId);
+}
+
+// ── Custom tokens (user-added via contract address) ──────────────────
+
+export interface CustomTokenRow {
+  chain: Chain;
+  address: string;
+  symbol: string;
+  name: string;
+  decimals: number;
+  poolAddress: string;
+  logoUrl: string | null;
+  addedAt: string;
+}
+
+export function addCustomToken(t: Omit<CustomTokenRow, "addedAt">): void {
+  getDb()
+    .prepare(
+      `INSERT INTO custom_tokens
+       (chain, address, symbol, name, decimals, pool_address, logo_url, added_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(chain, address) DO UPDATE SET
+         symbol = excluded.symbol,
+         name = excluded.name,
+         decimals = excluded.decimals,
+         pool_address = excluded.pool_address,
+         logo_url = excluded.logo_url`,
+    )
+    .run(
+      t.chain,
+      t.address,
+      t.symbol,
+      t.name,
+      t.decimals,
+      t.poolAddress,
+      t.logoUrl,
+      new Date().toISOString(),
+    );
+}
+
+export function listCustomTokens(chain: Chain): CustomTokenRow[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT chain, address, symbol, name, decimals, pool_address, logo_url, added_at
+       FROM custom_tokens WHERE chain = ? ORDER BY added_at DESC`,
+    )
+    .all(chain) as any[];
+  return rows.map((r) => ({
+    chain: r.chain,
+    address: r.address,
+    symbol: r.symbol,
+    name: r.name,
+    decimals: r.decimals,
+    poolAddress: r.pool_address,
+    logoUrl: r.logo_url,
+    addedAt: r.added_at,
+  }));
+}
+
+export function findCustomTokenBySymbol(chain: Chain, symbol: string): CustomTokenRow | null {
+  const row = getDb()
+    .prepare(
+      `SELECT chain, address, symbol, name, decimals, pool_address, logo_url, added_at
+       FROM custom_tokens WHERE chain = ? AND UPPER(symbol) = UPPER(?)`,
+    )
+    .get(chain, symbol) as any;
+  if (!row) return null;
+  return {
+    chain: row.chain,
+    address: row.address,
+    symbol: row.symbol,
+    name: row.name,
+    decimals: row.decimals,
+    poolAddress: row.pool_address,
+    logoUrl: row.logo_url,
+    addedAt: row.added_at,
+  };
 }

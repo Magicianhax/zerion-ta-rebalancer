@@ -62,6 +62,22 @@ basketsRouter.post("/", async (c) => {
   };
   dbCreateBasket(basket);
   invalidateMetaCache();
+
+  // Kick off the first rebalance immediately. This is what the user expects
+  // when they create a basket — they funded the wallet, picked weights, and
+  // want it to *buy now*, not wait for the next hourly cron tick. The
+  // rebalancer's isFirstAllocation branch will honor the user's initial
+  // weights and skip TA on this first run.
+  //
+  // Fire-and-forget: don't block the HTTP response on a swap that may take
+  // 30-60s. The SSE stream and Telegram bot both subscribe to the rebalance
+  // event bus, so the user sees progress without us holding the connection.
+  rebalance(basket.id).catch((e: any) => {
+    process.stderr.write(
+      `[baskets] auto-rebalance after create failed for "${basket.id}": ${e.message}\n`,
+    );
+  });
+
   return c.json({ basket }, 201);
 });
 

@@ -1,73 +1,76 @@
 import { useEffect, useMemo, useState } from "react";
-import { X, AlertCircle, Sparkles, Wallet as WalletIcon, ChevronDown, Wand2, Info } from "lucide-react";
-import { api, type Chain, type TokenEntry, type WalletInfo } from "../api.ts";
+import { api, type Chain, type PolicySummary, type TokenEntry, type WalletInfo } from "../api.ts";
 import { fmtUsd } from "../utils/format.ts";
+import {
+  Btn, chainColor, Field, Icon, IconBtn, inputStyle, TokenChip,
+} from "./ui.tsx";
 
 interface Props {
   onClose: () => void;
-  onCreated: () => void;
+  onCreated: (basketId: string) => void;
 }
 
-interface Selection {
-  symbol: string;
-  weight: number;
-}
+interface Selection { symbol: string; weight: number }
 
 interface Template {
+  id: string;
   name: string;
-  description: string;
+  desc: string;
   taBias: number;
   tokens: Record<Chain, Array<{ symbol: string; weight: number }>>;
 }
 
 const TEMPLATES: Template[] = [
   {
-    name: "Major",
-    description: "Largest cap tokens, lower volatility",
+    id: "majors",
+    name: "Majors",
+    desc: "Blue-chips weighted toward the dominant L1.",
     taBias: 0.4,
     tokens: {
       solana: [
-        { symbol: "SOL", weight: 60 },
+        { symbol: "SOL",  weight: 60 },
         { symbol: "USDC", weight: 40 },
       ],
       base: [
-        { symbol: "ETH", weight: 60 },
+        { symbol: "ETH",  weight: 60 },
         { symbol: "USDC", weight: 40 },
       ],
     },
   },
   {
+    id: "memes",
     name: "Memes",
-    description: "Higher risk, momentum-driven",
+    desc: "Higher TA bias, momentum-driven, more volatile.",
     taBias: 0.6,
     tokens: {
       solana: [
         { symbol: "BONK", weight: 30 },
-        { symbol: "WIF", weight: 30 },
-        { symbol: "JUP", weight: 20 },
-        { symbol: "JTO", weight: 20 },
+        { symbol: "WIF",  weight: 30 },
+        { symbol: "JUP",  weight: 20 },
+        { symbol: "JTO",  weight: 20 },
       ],
       base: [
         { symbol: "DEGEN", weight: 35 },
         { symbol: "BRETT", weight: 35 },
-        { symbol: "AERO", weight: 30 },
+        { symbol: "AERO",  weight: 30 },
       ],
     },
   },
   {
+    id: "diversified",
     name: "Diversified",
-    description: "Balanced across the basket",
+    desc: "Spread across majors, mid-caps, and a stable buffer.",
     taBias: 0.5,
     tokens: {
       solana: [
-        { symbol: "SOL", weight: 40 },
-        { symbol: "JUP", weight: 20 },
+        { symbol: "SOL",  weight: 40 },
+        { symbol: "JUP",  weight: 20 },
         { symbol: "BONK", weight: 20 },
-        { symbol: "JTO", weight: 20 },
+        { symbol: "JTO",  weight: 20 },
       ],
       base: [
-        { symbol: "ETH", weight: 40 },
-        { symbol: "AERO", weight: 25 },
+        { symbol: "ETH",   weight: 40 },
+        { symbol: "AERO",  weight: 25 },
         { symbol: "CBBTC", weight: 20 },
         { symbol: "DEGEN", weight: 15 },
       ],
@@ -80,26 +83,75 @@ export default function NewBasketModal({ onClose, onCreated }: Props) {
   const [chain, setChain] = useState<Chain>("solana");
   const [budget, setBudget] = useState(100);
   const [taBias, setTaBias] = useState(0.5);
-  const [tokens, setTokens] = useState<TokenEntry[]>([]);
   const [selections, setSelections] = useState<Selection[]>([]);
+  const [activeTemplate, setActiveTemplate] = useState<string | null>(null);
+  const [advOpen, setAdvOpen] = useState(false);
+
+  const [tokens, setTokens] = useState<TokenEntry[]>([]);
   const [wallets, setWallets] = useState<WalletInfo[]>([]);
-  const [policies, setPolicies] = useState<any[]>([]);
+  const [policies, setPolicies] = useState<PolicySummary[]>([]);
   const [agentTokens, setAgentTokens] = useState<any[]>([]);
   const [walletName, setWalletName] = useState("");
   const [policyId, setPolicyId] = useState("");
   const [agentTokenName, setAgentTokenName] = useState("");
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [availableUsdc, setAvailableUsdc] = useState<number | null>(null);
   const [loadingBalance, setLoadingBalance] = useState(false);
 
-  useEffect(() => {
-    api.listTokens(chain).then((r) => setTokens(r.tokens.filter((t) => !t.isQuote))).catch(() => {});
-  }, [chain]);
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  // Fetch the user's USDC balance on the selected chain so they know what
-  // they can actually allocate. Refetch when the chain or wallet changes.
+  // Custom token (by contract address) state
+  const [customAddr, setCustomAddr] = useState("");
+  const [resolvingCustom, setResolvingCustom] = useState(false);
+  const [customError, setCustomError] = useState<string | null>(null);
+
+  // Token registry per chain
+  const refreshTokenList = () =>
+    api.listTokens(chain).then((r) => setTokens(r.tokens.filter((t) => !t.isQuote))).catch(() => {});
+
+  useEffect(() => { refreshTokenList(); /* eslint-disable-next-line */ }, [chain]);
+
+  const addCustomFromAddress = async () => {
+    const addr = customAddr.trim();
+    if (!addr) return;
+    setResolvingCustom(true);
+    setCustomError(null);
+    try {
+      const r = await api.resolveCustomToken(chain, addr);
+      const sym = r.token.symbol.toUpperCase();
+      // Refresh the chain's token list so the new entry shows in the grid.
+      await refreshTokenList();
+      // Auto-select the freshly-added token.
+      setSelections((cur) =>
+        cur.find((s) => s.symbol === sym) ? cur : [...cur, { symbol: sym, weight: 0 }],
+      );
+      setActiveTemplate(null);
+      setCustomAddr("");
+    } catch (e: any) {
+      setCustomError(e.message ?? "Failed to resolve token");
+    } finally {
+      setResolvingCustom(false);
+    }
+  };
+
+  // Auto-pick the only available wallet/policy/agent token (common self-host case)
+  useEffect(() => {
+    api.listWallets().then((r) => {
+      setWallets(r.wallets);
+      if (r.wallets.length === 1) setWalletName(r.wallets[0]!.name);
+    }).catch(() => {});
+    api.listPolicies().then((r) => {
+      setPolicies(r.policies);
+      if (r.policies.length === 1) setPolicyId(r.policies[0].id);
+    }).catch(() => {});
+    api.listAgentTokens().then((r) => {
+      setAgentTokens(r.tokens);
+      const active = r.tokens.find((t: any) => t.active) ?? r.tokens[0];
+      if (active) setAgentTokenName(active.name);
+    }).catch(() => {});
+  }, []);
+
+  // Refresh USDC balance whenever wallet/chain changes.
   useEffect(() => {
     if (!walletName) return;
     let alive = true;
@@ -117,29 +169,15 @@ export default function NewBasketModal({ onClose, onCreated }: Props) {
     return () => { alive = false; };
   }, [walletName, chain]);
 
-  // Auto-pick the only available wallet/policy/token — common case for personal self-host.
-  useEffect(() => {
-    api.listWallets().then((r) => {
-      setWallets(r.wallets);
-      if (r.wallets.length === 1) setWalletName(r.wallets[0]!.name);
-    }).catch(() => {});
-    api.listPolicies().then((r) => {
-      setPolicies(r.policies);
-      if (r.policies.length === 1) setPolicyId(r.policies[0].id);
-    }).catch(() => {});
-    api.listAgentTokens().then((r) => {
-      setAgentTokens(r.tokens);
-      const active = r.tokens.find((t: any) => t.active) ?? r.tokens[0];
-      if (active) setAgentTokenName(active.name);
-    }).catch(() => {});
-  }, []);
+  const knownSymbols = useMemo(() => new Set(tokens.map((t) => t.symbol)), [tokens]);
 
   const applyTemplate = (template: Template) => {
     const presets = template.tokens[chain];
-    const known = new Set(tokens.map((t) => t.symbol));
-    const valid = presets.filter((p) => known.has(p.symbol));
+    const valid = presets.filter((p) => knownSymbols.has(p.symbol));
     setSelections(valid.map((p) => ({ symbol: p.symbol, weight: p.weight })));
     setTaBias(template.taBias);
+    setActiveTemplate(template.id);
+    if (!name) setName(template.name);
   };
 
   const toggleToken = (sym: string) => {
@@ -147,10 +185,15 @@ export default function NewBasketModal({ onClose, onCreated }: Props) {
       if (cur.find((s) => s.symbol === sym)) return cur.filter((s) => s.symbol !== sym);
       return [...cur, { symbol: sym, weight: 0 }];
     });
+    setActiveTemplate(null);
   };
 
   const setWeight = (sym: string, w: number) => {
-    setSelections((cur) => cur.map((s) => (s.symbol === sym ? { ...s, weight: w } : s)));
+    setSelections((cur) => cur.map((s) => (s.symbol === sym ? { ...s, weight: Math.max(0, Math.min(100, w)) } : s)));
+  };
+
+  const removeToken = (sym: string) => {
+    setSelections((cur) => cur.filter((s) => s.symbol !== sym));
   };
 
   const autoBalance = () => {
@@ -162,16 +205,17 @@ export default function NewBasketModal({ onClose, onCreated }: Props) {
 
   const totalWeight = selections.reduce((sum, s) => sum + s.weight, 0);
   const weightOk = selections.length >= 2 && Math.abs(totalWeight - 100) < 0.01;
-  const credentialsOk = walletName && policyId && agentTokenName;
-  const canSubmit = name && weightOk && credentialsOk && budget > 0;
+  const credentialsOk = !!(walletName && policyId && agentTokenName);
+  const canSubmit = !!(name && weightOk && credentialsOk && budget > 0);
 
   const submit = async () => {
     if (!canSubmit) return;
-    setLoading(true);
+    setSubmitting(true);
     setError(null);
     try {
+      const id = `basket-${Date.now()}`;
       await api.createBasket({
-        id: `basket-${Date.now()}`,
+        id,
         name,
         chain,
         walletName,
@@ -182,316 +226,444 @@ export default function NewBasketModal({ onClose, onCreated }: Props) {
         taBias,
         tokens: selections.map((s) => ({ symbol: s.symbol, initialWeight: s.weight / 100 })),
       });
-      onCreated();
+      onCreated(id);
     } catch (e: any) {
       setError(e.message ?? "Failed to create basket");
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
-  const credentialsAutoFilled = useMemo(
-    () => wallets.length === 1 && policies.length === 1 && agentTokens.length >= 1,
-    [wallets.length, policies.length, agentTokens.length],
-  );
+  const credentialsAutoFilled =
+    wallets.length === 1 && policies.length === 1 && agentTokens.length >= 1;
+
+  // Esc to close
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const availableTokens = tokens.filter((t) => !selections.find((s) => s.symbol === t.symbol));
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-20" onClick={onClose}>
+    <div
+      onClick={onClose}
+      className="fade-in"
+      style={{
+        position: "fixed", inset: 0, zIndex: 100,
+        background: "rgba(0,0,0,.6)", backdropFilter: "blur(2px)",
+        display: "grid", placeItems: "center", padding: 20,
+      }}
+    >
       <div
-        className="bg-ink-800 border border-ink-700 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
+        className="scale-in"
+        style={{
+          width: 720, maxHeight: "90vh", overflow: "auto",
+          background: "var(--bg-1)", border: "1px solid var(--bd-3)",
+          borderRadius: 6, boxShadow: "var(--sh-2)",
+        }}
       >
-        <div className="p-6 border-b border-ink-700 flex items-center justify-between sticky top-0 bg-ink-800 z-10">
-          <div>
-            <h2 className="text-lg font-semibold">New basket</h2>
-            <p className="text-xs text-ink-400 mt-0.5">Pick a template or build your own</p>
-          </div>
-          <button onClick={onClose} className="p-2 hover:bg-ink-700 rounded-lg"><X className="w-4 h-4" /></button>
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", padding: "14px 18px", borderBottom: "1px solid var(--bd-2)" }}>
+          <Icon name="basket" size={14}/>
+          <h2 style={{ margin: "0 0 0 8px", fontSize: 13.5, color: "var(--tx-0)", fontWeight: 600, flex: 1 }}>New basket</h2>
+          <span className="mono" style={{ fontSize: 10.5, color: "var(--tx-3)", marginRight: 12 }}>esc to cancel</span>
+          <IconBtn icon="x" onClick={onClose} title="Close"/>
         </div>
 
-        <div className="p-6 space-y-6">
-          {/* Name + chain */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="md:col-span-2">
-              <label className="text-xs text-ink-400 block mb-1.5">Name</label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="my-basket"
-                autoFocus
-                className="w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent transition"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-ink-400 block mb-1.5">Chain</label>
-              <div className="grid grid-cols-2 gap-1 bg-ink-700 border border-ink-600 rounded-lg p-1">
-                {(["solana", "base"] as Chain[]).map((c) => (
-                  <button
-                    key={c}
-                    onClick={() => { setChain(c); setSelections([]); }}
-                    className={`text-xs rounded-md py-1.5 transition capitalize ${
-                      chain === c ? "bg-accent text-white" : "text-ink-300 hover:bg-ink-600"
-                    }`}
-                  >
-                    {c}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Helper line — clarifies what we actually swap from */}
-          <div className="flex items-start gap-2 text-xs text-ink-400 bg-ink-900/40 border border-ink-700 rounded-lg px-3 py-2.5 -mt-2">
-            <Info className="w-3.5 h-3.5 mt-0.5 shrink-0 text-accent" />
-            <div className="leading-relaxed">
-              We'll swap from <span className="font-medium text-ink-100">USDC</span> on{" "}
-              <span className="font-medium text-ink-100 capitalize">{chain}</span> into your selected tokens.
-              Make sure the wallet holds USDC plus a small amount of native gas
-              ({chain === "solana" ? "SOL" : "ETH"}).
-            </div>
-          </div>
-
+        <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 18 }}>
           {/* Templates */}
-          <div>
-            <div className="flex items-center gap-2 text-xs text-ink-400 mb-2">
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Quick start</span>
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              {TEMPLATES.map((t) => (
-                <button
-                  key={t.name}
-                  onClick={() => applyTemplate(t)}
-                  className="text-left bg-ink-700 hover:bg-ink-600 border border-ink-600 hover:border-accent/50 rounded-lg p-3 transition group"
-                >
-                  <div className="font-medium text-sm">{t.name}</div>
-                  <div className="text-xs text-ink-400 mt-0.5 leading-tight">{t.description}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Tokens */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-xs text-ink-400">Tokens & weights</label>
-              <button
-                onClick={autoBalance}
-                disabled={selections.length === 0}
-                className="text-xs text-accent hover:text-white disabled:opacity-30 flex items-center gap-1 transition"
-              >
-                <Wand2 className="w-3 h-3" /> Auto-balance
-              </button>
-            </div>
-            <div className="grid grid-cols-2 gap-2 mb-3">
-              {tokens.map((t) => {
-                const sel = selections.find((s) => s.symbol === t.symbol);
-                const isSelected = !!sel;
+          <Field label="Template" hint="Starting weights and policy defaults">
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+              {TEMPLATES.map((t) => {
+                const active = activeTemplate === t.id;
                 return (
                   <button
-                    key={t.symbol}
-                    onClick={() => toggleToken(t.symbol)}
-                    className={`flex items-center gap-2 p-2.5 rounded-lg border transition ${
-                      isSelected
-                        ? "bg-accent/10 border-accent text-white"
-                        : "bg-ink-700 border-ink-600 text-ink-300 hover:bg-ink-600"
-                    }`}
+                    key={t.id}
+                    type="button"
+                    onClick={() => applyTemplate(t)}
+                    style={{
+                      textAlign: "left", padding: 12,
+                      border: `1px solid ${active ? "var(--ac-bd)" : "var(--bd-2)"}`,
+                      background: active ? "var(--ac-bg)" : "var(--bg-2)",
+                      color: "var(--tx-1)", borderRadius: 4, cursor: "pointer",
+                      display: "flex", flexDirection: "column", gap: 6,
+                    }}
                   >
-                    {t.logoUrl ? (
-                      <img src={t.logoUrl} alt={t.symbol} className="w-6 h-6 rounded-full bg-ink-800" />
-                    ) : (
-                      <div className="w-6 h-6 rounded-full bg-accent/20 text-[10px] flex items-center justify-center text-accent font-mono">
-                        {t.symbol.slice(0, 2)}
-                      </div>
-                    )}
-                    <div className="text-left min-w-0 flex-1">
-                      <div className="text-xs font-medium truncate">{t.symbol}</div>
-                      <div className="text-[10px] text-ink-400 truncate">{t.name}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ color: "var(--tx-0)", fontWeight: 600, fontSize: 12.5 }}>{t.name}</span>
+                      {active && <Icon name="check" size={11}/>}
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--tx-2)", lineHeight: 1.35 }}>{t.desc}</div>
+                    <div style={{ display: "flex", marginTop: 2 }}>
+                      {t.tokens[chain].map((tk, i) => (
+                        <span key={tk.symbol} style={{ marginLeft: i === 0 ? 0 : -3 }}>
+                          <TokenChip sym={tk.symbol} size={16}/>
+                        </span>
+                      ))}
                     </div>
                   </button>
                 );
               })}
             </div>
+          </Field>
 
-            {selections.length > 0 && (
-              <div className="space-y-2 bg-ink-900/40 border border-ink-700 rounded-lg p-3">
-                {selections.map((s) => (
-                  <div key={s.symbol} className="flex items-center gap-3">
-                    <span className="font-medium text-sm w-16">{s.symbol}</span>
-                    <input
-                      type="range"
-                      min={0} max={100} step={1}
-                      value={s.weight}
-                      onChange={(e) => setWeight(s.symbol, Number(e.target.value))}
-                      className="flex-1 accent-accent"
-                    />
-                    <input
-                      type="number"
-                      min={0} max={100} step={1}
-                      value={s.weight}
-                      onChange={(e) => setWeight(s.symbol, Number(e.target.value))}
-                      className="w-14 bg-ink-700 border border-ink-600 rounded px-2 py-1 text-xs text-right tabular-nums"
-                    />
-                    <span className="text-xs text-ink-400 w-3">%</span>
-                  </div>
-                ))}
-                <div className={`text-xs flex items-center gap-2 pt-1 ${weightOk ? "text-emerald-400" : "text-amber-400"}`}>
-                  <AlertCircle className="w-3.5 h-3.5" />
-                  Total: <span className="tabular-nums font-medium">{totalWeight}%</span>
-                  {!weightOk && (selections.length < 2 ? "(pick ≥2 tokens)" : "(must equal 100%)")}
-                </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 200px", gap: 12 }}>
+            <Field label="Name">
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="my-basket"
+                autoFocus
+                style={inputStyle()}
+              />
+            </Field>
+            <Field label="Chain">
+              <div style={{ display: "flex", gap: 4 }}>
+                {(["solana", "base"] as Chain[]).map((c) => {
+                  const active = chain === c;
+                  return (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => { setChain(c); setSelections([]); setActiveTemplate(null); }}
+                      style={{
+                        flex: 1, height: 32,
+                        background: active ? "var(--bg-3)" : "var(--bg-2)",
+                        color: active ? "var(--tx-0)" : "var(--tx-2)",
+                        border: `1px solid ${active ? "var(--bd-3)" : "var(--bd-2)"}`,
+                        borderRadius: 4, cursor: "pointer", fontSize: 12,
+                        display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
+                        textTransform: "capitalize",
+                      }}
+                    >
+                      <span style={{ width: 6, height: 6, borderRadius: 999, background: chainColor(c) }}/>
+                      {c}
+                    </button>
+                  );
+                })}
               </div>
-            )}
+            </Field>
           </div>
 
-          {/* Budget + TA bias */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs text-ink-400">USDC to allocate</label>
-                {availableUsdc != null && (
-                  <button
-                    onClick={() => setBudget(Math.max(5, Math.floor(availableUsdc * 100) / 100))}
-                    disabled={availableUsdc < 5}
-                    className="text-[10px] text-accent hover:text-white disabled:opacity-40 transition tabular-nums"
+          {/* Tokens & weights */}
+          <Field
+            label="Weights"
+            hint={
+              <span>
+                Allocations sum to{" "}
+                <span className="num" style={{ color: weightOk ? "var(--ok)" : "var(--warn)" }}>{totalWeight}%</span>
+                <button
+                  type="button"
+                  onClick={autoBalance}
+                  disabled={selections.length === 0}
+                  style={{
+                    marginLeft: 8, padding: "1px 6px", fontSize: 10.5,
+                    background: "var(--bg-3)", border: "1px solid var(--bd-2)",
+                    color: "var(--tx-2)", borderRadius: 3, cursor: "pointer",
+                    fontFamily: "var(--f-sans)", textTransform: "uppercase", letterSpacing: ".05em",
+                    opacity: selections.length === 0 ? .4 : 1,
+                  }}
+                >
+                  auto-balance
+                </button>
+              </span>
+            }
+          >
+            <div style={{ border: "1px solid var(--bd-2)", borderRadius: 4, overflow: "hidden" }}>
+              {selections.length === 0 ? (
+                <div style={{ padding: 16, fontSize: 11.5, color: "var(--tx-3)", background: "var(--bg-2)" }}>
+                  Pick a template above or add tokens below.
+                </div>
+              ) : (
+                selections.map((sel, i) => (
+                  <div
+                    key={sel.symbol}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "180px 1fr 70px 26px",
+                      alignItems: "center", gap: 12,
+                      padding: "8px 12px",
+                      borderBottom: i < selections.length - 1 ? "1px solid var(--bd-1)" : "none",
+                      background: "var(--bg-2)",
+                    }}
                   >
-                    Use max
-                  </button>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <TokenChip sym={sel.symbol} size={20}/>
+                      <span className="mono" style={{ color: "var(--tx-0)", fontSize: 12 }}>{sel.symbol}</span>
+                      <span style={{ fontSize: 10.5, color: "var(--tx-3)" }}>
+                        {tokens.find((t) => t.symbol === sel.symbol)?.name ?? ""}
+                      </span>
+                    </div>
+                    <input
+                      type="range" min={0} max={100} value={sel.weight}
+                      onChange={(e) => setWeight(sel.symbol, Number(e.target.value))}
+                      style={{ accentColor: "var(--ac)" }}
+                    />
+                    <div style={{ position: "relative" }}>
+                      <input
+                        value={sel.weight}
+                        onChange={(e) => setWeight(sel.symbol, Number(e.target.value) || 0)}
+                        style={{ ...inputStyle(28), textAlign: "right", paddingRight: 22 }}
+                      />
+                      <span style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "var(--tx-3)", fontSize: 11 }}>%</span>
+                    </div>
+                    <IconBtn icon="trash" onClick={() => removeToken(sel.symbol)} title="Remove"/>
+                  </div>
+                ))
+              )}
+              {availableTokens.length > 0 && (
+                <div style={{ padding: "8px 12px", display: "flex", gap: 6, flexWrap: "wrap", borderTop: "1px solid var(--bd-2)" }}>
+                  <span style={{
+                    fontSize: 10.5, color: "var(--tx-3)",
+                    textTransform: "uppercase", letterSpacing: ".06em",
+                    marginRight: 4, alignSelf: "center",
+                  }}>add</span>
+                  {availableTokens.slice(0, 24).map((t) => (
+                    <button
+                      key={t.symbol}
+                      type="button"
+                      onClick={() => toggleToken(t.symbol)}
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: 4,
+                        padding: "3px 6px 3px 4px",
+                        border: "1px solid var(--bd-2)",
+                        background: "var(--bg-3)", color: "var(--tx-1)",
+                        borderRadius: 3, fontSize: 11, cursor: "pointer",
+                      }}
+                    >
+                      <TokenChip sym={t.symbol} size={14}/>
+                      <span className="mono">{t.symbol}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Add custom token by contract address */}
+              <div style={{
+                padding: "8px 12px",
+                borderTop: "1px solid var(--bd-2)",
+                background: "var(--bg-1)",
+                display: "flex", flexDirection: "column", gap: 4,
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{
+                    fontSize: 10.5, color: "var(--tx-3)",
+                    textTransform: "uppercase", letterSpacing: ".06em",
+                    flex: "0 0 auto",
+                  }}>Custom</span>
+                  <input
+                    type="text"
+                    value={customAddr}
+                    onChange={(e) => { setCustomAddr(e.target.value); setCustomError(null); }}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCustomFromAddress(); } }}
+                    placeholder={chain === "solana" ? "Paste Solana mint address" : "Paste Base contract address (0x…)"}
+                    style={{
+                      flex: 1, height: 28, padding: "0 10px",
+                      background: "var(--bg-3)",
+                      border: `1px solid ${customError ? "var(--danger)" : "var(--bd-2)"}`,
+                      color: "var(--tx-0)", borderRadius: 4, outline: "none",
+                      fontSize: 11.5, fontFamily: "var(--f-mono)",
+                    }}
+                  />
+                  <Btn
+                    size="sm"
+                    variant="ghost"
+                    onClick={addCustomFromAddress}
+                    disabled={!customAddr.trim() || resolvingCustom}
+                    leftIcon={resolvingCustom ? "refresh" : "plus"}
+                  >
+                    {resolvingCustom ? "Resolving…" : "Add"}
+                  </Btn>
+                </div>
+                {customError ? (
+                  <span style={{ fontSize: 10.5, color: "var(--danger)" }}>{customError}</span>
+                ) : (
+                  <span style={{ fontSize: 10.5, color: "var(--tx-3)" }}>
+                    Looks up symbol, decimals, and best USDC pool from GeckoTerminal.
+                  </span>
                 )}
               </div>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400 text-sm">$</span>
+            </div>
+          </Field>
+
+          {/* Budget + TA bias */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <Field
+              label="Budget"
+              hint={
+                loadingBalance ? <span className="mono">checking…</span> :
+                availableUsdc != null ? <span className="num">USDC: {fmtUsd(availableUsdc)}</span> :
+                <span className="mono">—</span>
+              }
+            >
+              <div style={{ position: "relative" }}>
+                <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--tx-3)" }}>$</span>
                 <input
                   type="number"
                   value={budget}
-                  onChange={(e) => setBudget(Number(e.target.value))}
+                  onChange={(e) => setBudget(Number(e.target.value) || 0)}
                   min={5}
                   step={1}
-                  className={`w-full bg-ink-700 border rounded-lg pl-7 pr-3 py-2.5 text-sm focus:outline-none transition tabular-nums ${
-                    availableUsdc != null && budget > availableUsdc
-                      ? "border-amber-500/50 focus:border-amber-400"
-                      : "border-ink-600 focus:border-accent"
-                  }`}
+                  style={{ ...inputStyle(), paddingLeft: 22, fontFamily: "var(--f-mono)" }}
                 />
+                <div style={{
+                  position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
+                  display: "flex", gap: 4,
+                }}>
+                  {[50, 100, 250].map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => setBudget(v)}
+                      style={{
+                        padding: "2px 6px", fontSize: 10.5,
+                        background: "var(--bg-3)", border: "1px solid var(--bd-2)",
+                        color: "var(--tx-2)", borderRadius: 3, cursor: "pointer",
+                        fontFamily: "var(--f-mono)",
+                      }}
+                    >
+                      ${v}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="text-[11px] mt-1.5 tabular-nums">
-                {loadingBalance ? (
-                  <span className="text-ink-500">Checking balance…</span>
-                ) : availableUsdc == null ? (
-                  <span className="text-ink-500">—</span>
-                ) : availableUsdc < 5 ? (
-                  <span className="text-amber-400 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" /> Only {fmtUsd(availableUsdc)} USDC on {chain} — fund the wallet first
-                  </span>
-                ) : budget > availableUsdc ? (
-                  <span className="text-amber-400 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" /> Over balance — only {fmtUsd(availableUsdc)} USDC available
-                  </span>
-                ) : (
-                  <span className="text-ink-400">
-                    {fmtUsd(availableUsdc)} USDC available on {chain}
-                  </span>
-                )}
+              {availableUsdc != null && availableUsdc > 0 && availableUsdc >= 5 && (
+                <button
+                  type="button"
+                  onClick={() => setBudget(Math.max(5, Math.floor(availableUsdc * 100) / 100))}
+                  style={{
+                    background: "transparent", border: "none",
+                    color: "var(--ac)", fontSize: 10.5,
+                    textTransform: "uppercase", letterSpacing: ".05em",
+                    cursor: "pointer", padding: 0, alignSelf: "flex-start", marginTop: 2,
+                  }}
+                >
+                  use max
+                </button>
+              )}
+            </Field>
+
+            <Field
+              label={
+                <span>
+                  TA bias <span className="num" style={{ color: "var(--ac)", marginLeft: 6 }}>{taBias.toFixed(2)}</span>
+                </span>
+              }
+              hint={<span className="mono">0 user · 1 pure TA</span>}
+            >
+              <div style={{ position: "relative", padding: "10px 0 0" }}>
+                <input
+                  type="range" min={0} max={100} value={taBias * 100}
+                  onChange={(e) => setTaBias(Number(e.target.value) / 100)}
+                  style={{ width: "100%", accentColor: "var(--ac)" }}
+                />
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--tx-3)", fontFamily: "var(--f-mono)" }}>
+                  <span>user weights</span>
+                  <span>balanced</span>
+                  <span>pure TA</span>
+                </div>
               </div>
-            </div>
-            <div>
-              <label className="text-xs text-ink-400 block mb-1.5">
-                TA bias: <span className="text-accent font-medium tabular-nums">{(taBias * 100).toFixed(0)}%</span>
-              </label>
-              <input
-                type="range" min={0} max={1} step={0.05}
-                value={taBias}
-                onChange={(e) => setTaBias(Number(e.target.value))}
-                className="w-full accent-accent mt-2.5"
-              />
-              <div className="text-[11px] text-ink-500 mt-1.5">
-                {taBias < 0.3 ? "Hold close to your initial weights"
-                  : taBias > 0.7 ? "Mostly follow TA signals"
-                  : "Balanced between your weights and TA"}
-              </div>
-            </div>
+            </Field>
           </div>
 
-          {/* Wallet (auto-filled if only one) */}
-          <div>
+          {/* Wallet & policy */}
+          <div style={{ borderTop: "1px solid var(--bd-1)" }}>
             <button
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              className="w-full flex items-center justify-between text-xs text-ink-400 hover:text-ink-200 transition"
+              type="button"
+              onClick={() => setAdvOpen(!advOpen)}
+              style={{
+                width: "100%", textAlign: "left", padding: "10px 0",
+                background: "transparent", border: "none",
+                color: "var(--tx-2)", cursor: "pointer", fontSize: 12,
+                display: "flex", alignItems: "center", gap: 6,
+              }}
             >
-              <span className="flex items-center gap-2">
-                <WalletIcon className="w-3.5 h-3.5" />
-                Wallet & policy
-                {credentialsAutoFilled && credentialsOk && (
-                  <span className="text-emerald-400 text-[10px]">· auto-filled</span>
-                )}
-              </span>
-              <ChevronDown className={`w-3.5 h-3.5 transition ${showAdvanced ? "rotate-180" : ""}`} />
+              <Icon name={advOpen ? "chevron-down" : "chevron-right"} size={11}/>
+              Wallet & policy
+              {credentialsAutoFilled && credentialsOk && (
+                <span className="mono" style={{ marginLeft: "auto", color: "var(--ac)", fontSize: 10.5 }}>
+                  auto-filled · {wallets.length} wallet · {policies.length} policy
+                </span>
+              )}
             </button>
-
-            {showAdvanced && (
-              <div className="mt-3 space-y-3 bg-ink-900/40 border border-ink-700 rounded-lg p-3">
-                <div>
-                  <label className="text-[11px] text-ink-400 block mb-1">Wallet</label>
+            {advOpen && (
+              <div className="fade-in" style={{ padding: "8px 0 4px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <Field label="Wallet">
                   <select
                     value={walletName}
                     onChange={(e) => setWalletName(e.target.value)}
-                    className="w-full bg-ink-700 border border-ink-600 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-accent"
+                    style={inputStyle()}
                   >
                     <option value="">Choose…</option>
-                    {wallets.map((w) => <option key={w.name} value={w.name}>{w.name}</option>)}
+                    {wallets.map((w) => (
+                      <option key={w.name} value={w.name}>{w.name}</option>
+                    ))}
                   </select>
-                </div>
-                <div>
-                  <label className="text-[11px] text-ink-400 block mb-1">Policy</label>
+                </Field>
+                <Field label="OWS policy">
                   <select
                     value={policyId}
                     onChange={(e) => setPolicyId(e.target.value)}
-                    className="w-full bg-ink-700 border border-ink-600 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-accent"
+                    style={inputStyle()}
                   >
                     <option value="">Choose…</option>
-                    {policies.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    {policies.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
                   </select>
-                </div>
-                <div>
-                  <label className="text-[11px] text-ink-400 block mb-1">Agent token</label>
+                </Field>
+                <Field label="Agent token">
                   <select
                     value={agentTokenName}
                     onChange={(e) => setAgentTokenName(e.target.value)}
-                    className="w-full bg-ink-700 border border-ink-600 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-accent"
+                    style={inputStyle()}
                   >
                     <option value="">Choose…</option>
-                    {agentTokens.map((t: any) => <option key={t.name} value={t.name}>{t.name}</option>)}
+                    {agentTokens.map((t: any) => (
+                      <option key={t.name} value={t.name}>{t.name}</option>
+                    ))}
                   </select>
-                </div>
+                </Field>
+                <Field label="Drift tolerance">
+                  <div style={inputStyle(32, true)}>
+                    <span className="mono" style={{ flex: 1, color: "var(--tx-0)" }}>3.00%</span>
+                    <span style={{ color: "var(--tx-3)", fontSize: 10.5 }}>before guard fires</span>
+                  </div>
+                </Field>
               </div>
             )}
           </div>
 
           {error && (
-            <div className="text-sm text-red-400 bg-red-900/20 border border-red-900/40 rounded-lg p-3">{error}</div>
-          )}
-
-          <div className="flex items-center gap-3 pt-2 border-t border-ink-700">
-            <div className="flex-1 text-xs text-ink-400">
-              {canSubmit
-                ? `Will buy ${fmtUsd(budget)} of ${selections.length} tokens on ${chain}`
-                : "Fill in name, pick ≥2 tokens, weights to 100%"}
+            <div style={{
+              fontSize: 12, color: "var(--danger)",
+              background: "color-mix(in oklab, var(--danger) 10%, var(--bg-2))",
+              border: "1px solid color-mix(in oklab, var(--danger) 30%, var(--bd-2))",
+              borderRadius: 4, padding: "8px 10px",
+            }}>
+              {error}
             </div>
-            <button
-              onClick={onClose}
-              className="text-sm text-ink-300 hover:text-white px-3 py-2 transition"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={submit}
-              disabled={loading || !canSubmit}
-              className="bg-accent hover:bg-accent-dim disabled:opacity-30 disabled:cursor-not-allowed text-white font-medium rounded-lg px-5 py-2 text-sm transition"
-            >
-              {loading ? "Creating…" : "Create basket"}
-            </button>
-          </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{
+          borderTop: "1px solid var(--bd-2)",
+          padding: "12px 18px",
+          display: "flex", alignItems: "center", gap: 10,
+          background: "var(--bg-2)",
+        }}>
+          <span className="mono" style={{ fontSize: 11, color: "var(--tx-2)", display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <Icon name="bolt" size={11}/> First allocation fires immediately on create.
+          </span>
+          <span style={{ flex: 1 }}/>
+          <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+          <Btn variant="primary" rightIcon="bolt" onClick={submit} disabled={!canSubmit || submitting}>
+            {submitting ? "Creating…" : "Create & allocate"}
+          </Btn>
         </div>
       </div>
     </div>

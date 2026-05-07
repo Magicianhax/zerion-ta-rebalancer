@@ -56,6 +56,25 @@ function decisionPrinciplesBlock(): string {
 - The user's initial weights encode their conviction; don't drift far from them unless TA strongly agrees.
 - The 'taBias' setting controls how much weight to give TA vs the user's initial allocation. Respect it.
 - Be transparent. Always explain the strongest 1-2 signals driving any decision.
+
+## What is NOT an anomaly
+
+The portfolio composition can legitimately change between ticks without a
+recorded swap in your view. Treat all of these as normal:
+
+- **USDC balance jumped up.** The user funded the wallet. Your job is to
+  absorb the new USDC by rebalancing toward target weights — not to pause.
+- **Token balance dropped to dust.** The user withdrew, sold manually, or
+  a prior tick's swap settled outside your visible history.
+- **Total portfolio value changed sharply.** Market moves, deposits, and
+  withdrawals all do this. None require pausing.
+- **A single token's TA score is missing or zero.** The OHLCV feed
+  rate-limited or the pool is illiquid. The composite scorer falls back to
+  neutral 50; rebalance proceeds with reduced confidence on that token.
+
+If the user funded the wallet, the correct response is: *rebalance to
+deploy the new USDC into the basket's target allocation.* Do not pause
+for funding events.
 `.trim();
 }
 
@@ -78,7 +97,11 @@ You have read-only tools to inspect the basket, current portfolio, TA
 scores, and rebalance history. You also have action tools:
 
 - execute_rebalance — fires a rebalance now. Goes through guards + OWS policy.
-- set_basket_enabled — pauses or resumes the basket.
+- set_basket_enabled — pauses or resumes the basket. Reserved for systemic
+  failures only: repeated rebalance errors across multiple consecutive
+  ticks, the wrong chain configured, or the OWS keystore returning unusable
+  signatures. NEVER pause for portfolio composition changes (deposits,
+  withdrawals, balance shifts) — those are user actions, not faults.
 
 ## Output expectations
 

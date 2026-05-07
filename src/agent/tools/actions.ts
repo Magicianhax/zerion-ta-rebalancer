@@ -44,7 +44,7 @@ export const executeRebalanceTool = tool(
 
 export const setBasketEnabledTool = tool(
   "set_basket_enabled",
-  "Pause or resume a basket. Paused baskets are skipped by the cron and rejected by the guard layer. Use this if you detect something is wrong (price feed broken, unusual market) and want to stop trading until the user reviews.",
+  "Pause or resume a basket. Reserved for systemic failures only — repeated rebalance errors across consecutive ticks, misconfigured chain, OWS signing returning unusable results. DO NOT pause for portfolio composition changes (USDC inflows, token balances dropping, total value moving). Those are user actions or normal market behavior, not faults. Default to NOT calling this tool.",
   {
     basketId: z.string().describe("The basket id"),
     enabled: z.boolean().describe("True to resume, false to pause"),

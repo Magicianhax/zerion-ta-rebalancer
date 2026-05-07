@@ -5,13 +5,24 @@
  */
 
 import { Hono } from "hono";
-import { listAgentTokens, listPolicies } from "../../core/zerion.ts";
+import { listAgentTokens, listPolicies, showPolicy } from "../../core/zerion.ts";
 
 export const agentRouter = new Hono();
 
 agentRouter.get("/policies", async (c) => {
   try {
     return c.json({ policies: await listPolicies() });
+  } catch (e: any) {
+    return c.json({ error: { code: "zerion_error", message: e.message } }, 500);
+  }
+});
+
+agentRouter.get("/policies/:id", async (c) => {
+  const id = c.req.param("id");
+  try {
+    const policy = await showPolicy(id);
+    if (!policy) return c.json({ error: { code: "not_found" } }, 404);
+    return c.json({ policy });
   } catch (e: any) {
     return c.json({ error: { code: "zerion_error", message: e.message } }, 500);
   }

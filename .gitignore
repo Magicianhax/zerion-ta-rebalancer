@@ -38,3 +38,14 @@ data/
 TODO.private.md
 NOTES.private.md
 SCRATCH.md
+DESIGN_BRIEF.md
+tasks/
+
+# --- Misc local configs that shouldn't be in a public repo ---
+.DS_Store
+Thumbs.db
+*.bak
+*.tmp
+.eslintcache
+.npm/
+.pnpm-store/

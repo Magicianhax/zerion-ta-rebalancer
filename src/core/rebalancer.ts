@@ -166,7 +166,12 @@ export async function rebalance(basketId: string): Promise<RebalanceResult> {
       } catch (e: any) {
         swaps.push({ plan: step, error: e.message });
         process.stderr.write(`swap ${step.fromToken}→${step.toToken} failed: ${e.message}\n`);
-        break;
+        // Continue to the next step rather than aborting the whole tick.
+        // Each swap is independent; a single failure (slippage, RPC blip,
+        // funding edge case) shouldn't strand the rest of the rebalance.
+        // Plan ordering guarantees sells run before buys, so sells that
+        // succeeded already have funded the wallet for retried buys.
+        continue;
       }
     }
     // Drop cached positions for this wallet so post-trade balances refresh

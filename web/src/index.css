@@ -2,20 +2,157 @@
 @tailwind components;
 @tailwind utilities;
 
-html, body, #root {
-  height: 100%;
+/* Zerion TA Rebalancer — Design tokens */
+:root {
+  /* Surfaces — near-black, cool */
+  --bg-0: #07090b;          /* page */
+  --bg-1: #0c0f12;          /* panels */
+  --bg-2: #11151a;          /* raised cards */
+  --bg-3: #171c22;          /* hover / inputs */
+  --bg-4: #1d242b;          /* row hover, active */
+
+  /* Borders — hairline */
+  --bd-1: #1a1f25;
+  --bd-2: #242b33;
+  --bd-3: #2f3741;
+
+  /* Text */
+  --tx-0: #e7eaee;
+  --tx-1: #b8bfc8;
+  --tx-2: #828a94;
+  --tx-3: #5a626c;
+  --tx-4: #3a4048;
+
+  /* Accent — green */
+  --ac:    oklch(78% 0.16 145);
+  --ac-d:  oklch(70% 0.16 145);
+  --ac-dd: oklch(58% 0.14 145);
+  --ac-bg: color-mix(in oklab, oklch(78% 0.16 145) 14%, var(--bg-1));
+  --ac-bd: color-mix(in oklab, oklch(78% 0.16 145) 35%, var(--bd-2));
+
+  /* Semantic */
+  --ok:     oklch(78% 0.16 145);
+  --warn:   oklch(82% 0.15 80);
+  --danger: oklch(68% 0.20 25);
+  --info:   oklch(72% 0.13 240);
+
+  /* Chains — solana + base only (we don't run on ethereum) */
+  --chain-sol:  oklch(70% 0.18 305);
+  --chain-base: oklch(70% 0.16 250);
+
+  /* Type */
+  --f-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Radii — sharp */
+  --r-1: 3px;
+  --r-2: 5px;
+  --r-3: 8px;
+
+  /* Density */
+  --row-h: 36px;
+  --pad-1: 8px;
+  --pad-2: 12px;
+  --pad-3: 16px;
+  --pad-4: 20px;
+  --pad-5: 24px;
+
+  /* Shadows */
+  --sh-1: 0 1px 0 rgba(255,255,255,.02) inset, 0 1px 2px rgba(0,0,0,.4);
+  --sh-2: 0 8px 30px rgba(0,0,0,.5), 0 1px 0 rgba(255,255,255,.03) inset;
 }
 
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; padding: 0; }
 body {
-  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  background: var(--bg-0);
+  color: var(--tx-1);
+  font-family: var(--f-sans);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "ss01", "cv11";
 }
 
-* {
-  -webkit-tap-highlight-color: transparent;
-}
+* { -webkit-tap-highlight-color: transparent; }
 
-/* Subtle scrollbar */
-::-webkit-scrollbar { width: 8px; height: 8px; }
+.mono { font-family: var(--f-mono); font-feature-settings: "tnum", "zero"; }
+.num  { font-family: var(--f-mono); font-variant-numeric: tabular-nums; font-feature-settings: "tnum", "zero"; }
+
+/* Scrollbars */
+::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #26262d; border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: #3a3a44; }
+::-webkit-scrollbar-thumb { background: var(--bd-2); border-radius: 10px; border: 2px solid var(--bg-0); }
+::-webkit-scrollbar-thumb:hover { background: var(--bd-3); }
+
+/* Selection */
+::selection { background: color-mix(in oklab, var(--ac) 35%, transparent); color: var(--tx-0); }
+
+/* Focus ring */
+:focus-visible { outline: 1px solid var(--ac); outline-offset: 1px; }
+
+/* Utility */
+.hairline { border: 1px solid var(--bd-1); }
+.kbd {
+  font-family: var(--f-mono);
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid var(--bd-2);
+  background: var(--bg-2);
+  color: var(--tx-2);
+}
+
+/* Animations */
+@keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:.35} }
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+@keyframes blink { 50% { opacity: 0; } }
+@keyframes fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes slide-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes scale-in { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: scale(1); } }
+
+.dot-pulse { animation: pulse-dot 1.4s ease-in-out infinite; }
+.fade-in { animation: fade-in .25s ease both; }
+.slide-up { animation: slide-up .3s ease both; }
+.scale-in { animation: scale-in .2s ease both; }
+
+/* Skeleton */
+.skel {
+  background: linear-gradient(90deg, var(--bg-2) 0%, var(--bg-3) 50%, var(--bg-2) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s infinite linear;
+  border-radius: 3px;
+}
+
+/* Tabular table */
+.t-row {
+  display: grid;
+  align-items: center;
+  height: var(--row-h);
+  border-bottom: 1px solid var(--bd-1);
+  padding: 0 var(--pad-3);
+}
+.t-row:hover { background: var(--bg-3); }
+.t-head {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--tx-3);
+  font-weight: 500;
+}
+
+/* No-select for resize handles, etc. */
+.no-select { user-select: none; }
+
+/* Mobile responsive overrides — desktop is the target, mobile graceful degrade */
+@media (max-width: 760px) {
+  body { min-width: 0 !important; }
+  .stats-strip { grid-template-columns: repeat(2, minmax(0,1fr)) !important; }
+  .basket-header { grid-template-columns: 1fr auto !important; gap: 8px !important; }
+  .basket-expanded { grid-template-columns: 1fr !important; }
+  .hide-mob { display: none !important; }
+  .topbar-nav { display: none !important; }
+}

@@ -1,23 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  LogOut,
-  Plus,
-  Settings as SettingsIcon,
-  Activity as ActivityIcon,
-  Wallet as WalletIcon,
-  LayoutGrid,
-  Briefcase,
-} from "lucide-react";
-import { api, type Basket, type Portfolio, type RebalanceResult } from "../api.ts";
+import { api, type Basket, type Portfolio, type RebalanceResult, type Chain } from "../api.ts";
 import BasketCard from "./BasketCard.tsx";
 import NewBasketModal from "./NewBasketModal.tsx";
-import SettingsPanel from "./SettingsPanel.tsx";
+import SettingsTab from "./SettingsPanel.tsx";
 import WalletView, { type WalletData } from "./WalletView.tsx";
 import StatsStrip from "./StatsStrip.tsx";
 import ActivityView from "./ActivityView.tsx";
-import { BasketCardSkeleton } from "./Skeleton.tsx";
+import FirstAllocOverlay, { type AllocStage } from "./FirstAllocOverlay.tsx";
+import { Btn, Icon, SegBar, StatusDot, type IconName, chainColor } from "./ui.tsx";
 
-type Tab = "baskets" | "wallet" | "activity";
+type Tab = "baskets" | "wallet" | "activity" | "settings";
 
 interface Props {
   baskets: Basket[] | null;
@@ -28,16 +20,17 @@ interface Props {
 
 export default function Dashboard({ baskets, lastEvent, onRefresh, onLogout }: Props) {
   const [showNew, setShowNew] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const [tab, setTab] = useState<Tab>("baskets");
+  const [sidebar, setSidebar] = useState<"expanded" | "collapsed">("expanded");
 
   // ── Per-basket data lifted to parent ──────────────────────────────
-  // Both StatsStrip (for aggregate stats) and BasketCard (for per-card
-  // display) need the same per-basket portfolio + rebalance history.
-  // Fetching from each component caused duplicate network calls on every
-  // mount. Lifting here means one fetch per basket per dependency change.
   const [portfolios, setPortfolios] = useState<Record<string, Portfolio>>({});
   const [rebalanceHistories, setRebalanceHistories] = useState<Record<string, RebalanceResult[]>>({});
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+
+  // First-allocation overlay state — driven by SSE for the most recently created basket.
+  const [allocBasketId, setAllocBasketId] = useState<string | null>(null);
+  const [allocStage, setAllocStage] = useState<AllocStage>("queued");
 
   const refreshBasketData = async (basketId: string) => {
     const [pf, rb] = await Promise.all([
@@ -48,22 +41,29 @@ export default function Dashboard({ baskets, lastEvent, onRefresh, onLogout }: P
     if (rb) setRebalanceHistories((prev) => ({ ...prev, [basketId]: rb.rebalances }));
   };
 
-  // Fetch on basket list change (initial load, basket created/deleted).
-  // The cache in api.ts dedupes if the same basket data was already fetched
-  // within the TTL window, so this is cheap on re-renders.
   const basketIdsKey = useMemo(() => baskets?.map((b) => b.id).join(",") ?? "", [baskets]);
   useEffect(() => {
     if (!baskets) return;
     for (const b of baskets) refreshBasketData(b.id);
+    // First basket auto-expands so the user sees the populated card without clicking.
+    if (baskets.length > 0 && Object.keys(expanded).length === 0) {
+      setExpanded({ [baskets[0]!.id]: true });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [basketIdsKey]);
 
-  // SSE rebalance:done events arrive with the basket id — refresh just
-  // that basket's data so the dashboard reflects post-trade balances.
   useEffect(() => {
-    if (lastEvent?.type === "rebalance:done") {
-      const basketId = (lastEvent.payload as { basketId?: string })?.basketId;
+    if (!lastEvent) return;
+    const basketId = (lastEvent.payload as { basketId?: string })?.basketId;
+    if (lastEvent.type === "rebalance:start" && basketId === allocBasketId) {
+      setAllocStage("quoting");
+    }
+    if (lastEvent.type === "rebalance:done") {
       if (basketId) refreshBasketData(basketId);
+      if (basketId === allocBasketId) {
+        setAllocStage("done");
+        setTimeout(() => { setAllocBasketId(null); setAllocStage("queued"); }, 1800);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastEvent]);
@@ -80,21 +80,9 @@ export default function Dashboard({ baskets, lastEvent, onRefresh, onLogout }: P
         list.wallets.map(async (info) => {
           try {
             const r = await api.walletHoldings(info.name);
-            return {
-              info,
-              totalUsd: r.totalUsd,
-              holdings: r.holdings,
-              errors: r.errors,
-              fetchedAt: r.fetchedAt,
-            };
+            return { info, totalUsd: r.totalUsd, holdings: r.holdings, errors: r.errors, fetchedAt: r.fetchedAt };
           } catch (e: any) {
-            return {
-              info,
-              totalUsd: 0,
-              holdings: [],
-              errors: [e.message],
-              fetchedAt: null,
-            };
+            return { info, totalUsd: 0, holdings: [], errors: [e.message], fetchedAt: null };
           }
         }),
       );
@@ -111,7 +99,7 @@ export default function Dashboard({ baskets, lastEvent, onRefresh, onLogout }: P
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
-  // Global keyboard shortcuts — Cmd/Ctrl+K opens New Basket modal.
+  // Cmd/Ctrl+K opens New Basket.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -123,235 +111,428 @@ export default function Dashboard({ baskets, lastEvent, onRefresh, onLogout }: P
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  const liveStatus =
-    lastEvent?.type === "rebalance:start"
-      ? { label: "Rebalancing now", color: "text-amber-400" }
-      : lastEvent?.type === "rebalance:done"
-      ? { label: "Idle · last just now", color: "text-ink-400" }
-      : { label: "Idle", color: "text-ink-400" };
+  const toggleExpand = (id: string) => setExpanded((e) => ({ ...e, [id]: !e[id] }));
 
   return (
-    <div className="min-h-full flex">
-      {/* Sidebar */}
-      <aside className="hidden md:flex w-56 flex-col border-r border-ink-700 bg-ink-900/40">
-        <div className="px-5 py-5 border-b border-ink-700">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-accent to-accent-dim flex items-center justify-center shadow-md shadow-accent/20">
-              <ActivityIcon className="w-4 h-4 text-white" />
-            </div>
-            <div className="min-w-0">
-              <div className="text-sm font-semibold leading-tight">Zerion TA</div>
-              <div className={`text-[11px] truncate ${liveStatus.color}`}>{liveStatus.label}</div>
-            </div>
-          </div>
-        </div>
-
-        <nav className="flex-1 p-2 space-y-0.5">
-          <SidebarItem active={tab === "baskets"} onClick={() => setTab("baskets")} icon={<Briefcase className="w-4 h-4" />} count={baskets?.length}>
-            Baskets
-          </SidebarItem>
-          <SidebarItem active={tab === "wallet"} onClick={() => setTab("wallet")} icon={<WalletIcon className="w-4 h-4" />}>
-            Wallet
-          </SidebarItem>
-          <SidebarItem active={tab === "activity"} onClick={() => setTab("activity")} icon={<LayoutGrid className="w-4 h-4" />}>
-            Activity
-          </SidebarItem>
-        </nav>
-
-        <div className="p-3 border-t border-ink-700 space-y-1">
-          <button
-            onClick={() => setShowNew(true)}
-            className="w-full bg-accent hover:bg-accent-dim text-white text-sm font-medium rounded-lg py-2 flex items-center justify-center gap-2 transition shadow-md shadow-accent/20"
-          >
-            <Plus className="w-4 h-4" /> New basket
-            <kbd className="ml-1 text-[10px] bg-white/10 px-1.5 py-0.5 rounded">⌘K</kbd>
-          </button>
-          <button
-            onClick={() => setShowSettings(true)}
-            className="w-full hover:bg-ink-700 text-ink-300 text-xs rounded-lg py-1.5 flex items-center justify-center gap-2 transition"
-          >
-            <SettingsIcon className="w-3.5 h-3.5" /> Settings
-          </button>
-          <button
-            onClick={onLogout}
-            className="w-full hover:bg-ink-700 text-ink-400 text-xs rounded-lg py-1.5 flex items-center justify-center gap-2 transition"
-          >
-            <LogOut className="w-3.5 h-3.5" /> Sign out
-          </button>
-        </div>
-      </aside>
-
-      {/* Mobile top bar */}
-      <header className="md:hidden border-b border-ink-700 sticky top-0 backdrop-blur bg-ink-900/80 z-10 w-full">
-        <div className="px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-accent to-accent-dim flex items-center justify-center">
-              <ActivityIcon className="w-3.5 h-3.5 text-white" />
-            </div>
-            <span className="font-semibold text-sm">Zerion TA</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <button onClick={() => setShowNew(true)} className="p-2 hover:bg-ink-700 rounded-lg" title="New basket">
-              <Plus className="w-4 h-4" />
-            </button>
-            <button onClick={() => setShowSettings(true)} className="p-2 hover:bg-ink-700 rounded-lg" title="Settings">
-              <SettingsIcon className="w-4 h-4" />
-            </button>
-            <button onClick={onLogout} className="p-2 hover:bg-ink-700 rounded-lg" title="Sign out">
-              <LogOut className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-        <nav className="flex border-t border-ink-700">
-          <MobileTab active={tab === "baskets"} onClick={() => setTab("baskets")}>Baskets</MobileTab>
-          <MobileTab active={tab === "wallet"} onClick={() => setTab("wallet")}>Wallet</MobileTab>
-          <MobileTab active={tab === "activity"} onClick={() => setTab("activity")}>Activity</MobileTab>
-        </nav>
-      </header>
-
-      <main className="flex-1 max-w-5xl mx-auto px-6 py-8 w-full">
-        {tab === "baskets" && (
-          <>
-            {baskets && baskets.length > 0 && (
-              <StatsStrip
+    <div style={{ minHeight: "100vh", background: "var(--bg-0)", display: "flex", flexDirection: "column" }}>
+      <TopBar tab={tab} setTab={setTab} onToggleSidebar={() => setSidebar((s) => s === "expanded" ? "collapsed" : "expanded")} />
+      <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
+        <Sidebar tab={tab} setTab={setTab} mode={sidebar} baskets={baskets ?? []} portfolios={portfolios} />
+        <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          {tab === "baskets" && (
+            <StatsStrip baskets={baskets ?? []} portfolios={portfolios} rebalanceHistories={rebalanceHistories} />
+          )}
+          <div style={{ flex: 1, overflow: "auto" }}>
+            {tab === "baskets" && (
+              <BasketsTabSection
                 baskets={baskets}
                 portfolios={portfolios}
                 rebalanceHistories={rebalanceHistories}
+                expanded={expanded}
+                toggleExpand={toggleExpand}
+                onNew={() => setShowNew(true)}
+                onRefreshBasket={refreshBasketData}
+                onRefreshList={onRefresh}
+                allocBasketId={allocBasketId}
+                allocStage={allocStage}
               />
             )}
-
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-semibold">Baskets</h2>
-              <button
-                onClick={() => setShowNew(true)}
-                className="bg-accent hover:bg-accent-dim text-white text-sm font-medium rounded-lg px-3 py-2 flex items-center gap-2 transition md:hidden"
-              >
-                <Plus className="w-4 h-4" /> New
-              </button>
-            </div>
-
-            {baskets === null ? (
-              <div className="grid gap-4 md:grid-cols-2">
-                <BasketCardSkeleton />
-                <BasketCardSkeleton />
-              </div>
-            ) : baskets.length === 0 ? (
-              <EmptyState
-                title="No baskets yet"
-                body="A basket holds tokens you want auto-rebalanced. The bot holds the weights you set, then nudges them every hour based on TA — within your policy limits."
-                action="Create your first basket"
-                onAction={() => setShowNew(true)}
-                shortcut="⌘K"
-              />
-            ) : (
-              <div className="grid gap-4 md:grid-cols-2">
-                {baskets.map((b) => (
-                  <BasketCard
-                    key={b.id}
-                    basket={b}
-                    portfolio={portfolios[b.id]}
-                    history={rebalanceHistories[b.id]}
-                    onRefreshBasket={() => refreshBasketData(b.id)}
-                    onChange={onRefresh}
-                  />
-                ))}
-              </div>
+            {tab === "wallet" && (
+              <WalletView wallets={wallets} loading={walletsLoading} onRefresh={refreshWallets} />
             )}
-          </>
-        )}
-
-        {tab === "wallet" && (
-          <WalletView wallets={wallets} loading={walletsLoading} onRefresh={refreshWallets} />
-        )}
-
-        {tab === "activity" && <ActivityView baskets={baskets ?? []} />}
-      </main>
-
-      {showNew && <NewBasketModal onClose={() => setShowNew(false)} onCreated={() => { setShowNew(false); onRefresh(); }} />}
-      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
+            {tab === "activity" && <ActivityView baskets={baskets ?? []} />}
+            {tab === "settings" && <SettingsTab onLogout={onLogout} />}
+          </div>
+          <Footer lastEvent={lastEvent}/>
+        </main>
+      </div>
+      {showNew && (
+        <NewBasketModal
+          onClose={() => setShowNew(false)}
+          onCreated={(basketId: string) => {
+            setShowNew(false);
+            setAllocBasketId(basketId);
+            setAllocStage("queued");
+            setExpanded((e) => ({ ...e, [basketId]: true }));
+            onRefresh();
+          }}
+        />
+      )}
+      <FirstAllocOverlay
+        basketId={allocBasketId}
+        stage={allocStage}
+        onDismiss={() => { setAllocBasketId(null); setAllocStage("queued"); }}
+      />
     </div>
   );
 }
 
-function SidebarItem({
-  active,
-  onClick,
-  icon,
-  count,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-  count?: number;
-  children: React.ReactNode;
-}) {
+/* -------------------------------------------------------------------------- */
+/*  TopBar                                                                    */
+/* -------------------------------------------------------------------------- */
+function TopBar({ tab, setTab, onToggleSidebar }: { tab: Tab; setTab: (t: Tab) => void; onToggleSidebar: () => void }) {
+  const tabs: Array<{ k: Tab; label: string; icon: IconName }> = [
+    { k: "baskets",  label: "Baskets",  icon: "basket"   },
+    { k: "wallet",   label: "Wallet",   icon: "wallet"   },
+    { k: "activity", label: "Activity", icon: "activity" },
+    { k: "settings", label: "Settings", icon: "settings" },
+  ];
   return (
-    <button
-      onClick={onClick}
-      className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-lg transition ${
-        active
-          ? "bg-accent/15 text-white border border-accent/30"
-          : "text-ink-300 hover:bg-ink-800 border border-transparent"
-      }`}
-    >
-      <span className={active ? "text-accent" : ""}>{icon}</span>
-      <span className="flex-1 text-left">{children}</span>
-      {count != null && count > 0 && (
-        <span className="text-[11px] tabular-nums bg-ink-700 text-ink-300 rounded-md px-1.5 py-0.5">{count}</span>
-      )}
-    </button>
-  );
-}
-
-function MobileTab({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`flex-1 text-xs py-2.5 border-b-2 transition ${
-        active ? "border-accent text-white" : "border-transparent text-ink-400"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
-function EmptyState({
-  title,
-  body,
-  action,
-  onAction,
-  shortcut,
-}: {
-  title: string;
-  body: string;
-  action: string;
-  onAction: () => void;
-  shortcut?: string;
-}) {
-  return (
-    <div className="border border-dashed border-ink-600 rounded-xl p-12 text-center">
-      <div className="w-14 h-14 mx-auto mb-4 rounded-full bg-gradient-to-br from-accent/20 to-accent/5 flex items-center justify-center border border-accent/30">
-        <Plus className="w-6 h-6 text-accent" />
-      </div>
-      <div className="text-ink-100 font-medium text-base mb-2">{title}</div>
-      <p className="text-sm text-ink-400 max-w-md mx-auto mb-5 leading-relaxed">{body}</p>
+    <header style={{
+      height: 44, background: "var(--bg-1)",
+      borderBottom: "1px solid var(--bd-2)",
+      display: "flex", alignItems: "center", padding: "0 12px",
+      gap: 10, flex: "0 0 auto",
+    }}>
       <button
-        onClick={onAction}
-        className="bg-accent hover:bg-accent-dim text-white text-sm font-medium rounded-lg px-5 py-2.5 inline-flex items-center gap-2 shadow-md shadow-accent/20 transition"
+        onClick={onToggleSidebar}
+        title="Toggle sidebar"
+        style={{
+          background: "transparent", border: "1px solid var(--bd-1)",
+          borderRadius: 4, padding: "4px 6px", color: "var(--tx-2)", cursor: "pointer",
+          display: "inline-flex", alignItems: "center",
+        }}
       >
-        {action}
-        {shortcut && <kbd className="text-[10px] bg-white/10 px-1.5 py-0.5 rounded">{shortcut}</kbd>}
+        <Icon name="panel" size={13}/>
       </button>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{
+          width: 22, height: 22, borderRadius: 4,
+          background: "linear-gradient(135deg, var(--ac), var(--ac-dd))",
+          display: "grid", placeItems: "center", color: "#06120a",
+        }}>
+          <Icon name="bolt" size={12} stroke={2.2}/>
+        </div>
+        <span style={{ fontSize: 12.5, color: "var(--tx-0)", fontWeight: 600 }}>Zerion TA Rebalancer</span>
+      </div>
+
+      <div style={{ height: 18, width: 1, background: "var(--bd-2)", margin: "0 6px" }}/>
+
+      <nav className="topbar-nav" style={{ display: "flex", gap: 2 }}>
+        {tabs.map((t) => (
+          <button
+            key={t.k}
+            onClick={() => setTab(t.k)}
+            style={{
+              height: 28, padding: "0 10px",
+              background: tab === t.k ? "var(--bg-3)" : "transparent",
+              color: tab === t.k ? "var(--tx-0)" : "var(--tx-2)",
+              border: tab === t.k ? "1px solid var(--bd-2)" : "1px solid transparent",
+              borderRadius: 4, cursor: "pointer", fontSize: 12,
+              display: "inline-flex", alignItems: "center", gap: 6,
+              textTransform: "capitalize",
+            }}
+          >
+            <Icon name={t.icon} size={12}/>{t.label}
+          </button>
+        ))}
+      </nav>
+
+      <div style={{ flex: 1 }}/>
+
+      <div className="hide-mob" style={{
+        display: "flex", alignItems: "center", gap: 6,
+        padding: "4px 8px", background: "var(--bg-2)",
+        border: "1px solid var(--bd-1)", borderRadius: 4, fontSize: 11,
+      }}>
+        <StatusDot kind="ok" pulse/>
+        <span className="mono" style={{ color: "var(--tx-1)" }}>cron · live</span>
+      </div>
+    </header>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Sidebar                                                                   */
+/* -------------------------------------------------------------------------- */
+function Sidebar({ tab, setTab, mode, baskets, portfolios }: {
+  tab: Tab; setTab: (t: Tab) => void; mode: "expanded" | "collapsed";
+  baskets: Basket[]; portfolios: Record<string, Portfolio>;
+}) {
+  const collapsed = mode === "collapsed";
+  const items: Array<{ k: Tab; label: string; icon: IconName; count: number | null }> = [
+    { k: "baskets",  label: "Baskets",  icon: "basket",  count: baskets.length },
+    { k: "wallet",   label: "Wallet",   icon: "wallet",  count: null },
+    { k: "activity", label: "Activity", icon: "activity",count: null },
+    { k: "settings", label: "Settings", icon: "settings",count: null },
+  ];
+  // Per-chain totals — sums portfolio USD for baskets on each chain.
+  const chainTotals: Record<Chain, number> = { solana: 0, base: 0 };
+  for (const b of baskets) {
+    chainTotals[b.chain] += portfolios[b.id]?.totalUsd ?? 0;
+  }
+  const fmt = (n: number) => n >= 1000 ? `$${(n / 1000).toFixed(1)}K` : `$${n.toFixed(0)}`;
+
+  return (
+    <aside style={{
+      width: collapsed ? 48 : 200, flex: "0 0 auto",
+      background: "var(--bg-1)", borderRight: "1px solid var(--bd-2)",
+      padding: "10px 8px", display: "flex", flexDirection: "column",
+      transition: "width .18s ease",
+    }}>
+      {!collapsed && (
+        <div style={{ padding: "4px 6px 8px", fontSize: 10, color: "var(--tx-3)", textTransform: "uppercase", letterSpacing: ".06em" }}>
+          Workspace
+        </div>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        {items.map((it) => {
+          const active = tab === it.k;
+          return (
+            <button
+              key={it.k}
+              onClick={() => setTab(it.k)}
+              title={collapsed ? it.label : undefined}
+              style={{
+                height: 30, padding: collapsed ? 0 : "0 8px",
+                background: active ? "var(--bg-3)" : "transparent",
+                color: active ? "var(--tx-0)" : "var(--tx-1)",
+                border: "1px solid " + (active ? "var(--bd-2)" : "transparent"),
+                borderLeft: active ? "1px solid var(--ac)" : "1px solid transparent",
+                borderRadius: 4, cursor: "pointer", fontSize: 12.5,
+                display: "flex", alignItems: "center", gap: 8,
+                justifyContent: collapsed ? "center" : "flex-start",
+              }}
+            >
+              <Icon name={it.icon} size={14}/>
+              {!collapsed && (
+                <>
+                  <span style={{ flex: 1, textAlign: "left" }}>{it.label}</span>
+                  {it.count != null && it.count > 0 && (
+                    <span className="mono" style={{ fontSize: 10.5, color: "var(--tx-3)" }}>{it.count}</span>
+                  )}
+                </>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {!collapsed && (
+        <>
+          <div style={{ padding: "16px 6px 8px", fontSize: 10, color: "var(--tx-3)", textTransform: "uppercase", letterSpacing: ".06em" }}>
+            Chains
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            {(["solana", "base"] as Chain[]).map((c) => (
+              <div key={c} style={{
+                height: 26, padding: "0 8px",
+                display: "flex", alignItems: "center", gap: 8,
+                fontSize: 11.5, color: "var(--tx-1)",
+              }}>
+                <span style={{
+                  width: 6, height: 6, borderRadius: 999,
+                  background: chainColor(c), boxShadow: "0 0 6px currentColor",
+                }}/>
+                <span style={{ flex: 1, textTransform: "capitalize" }}>{c}</span>
+                <span className="mono num" style={{ color: "var(--tx-3)", fontSize: 10.5 }}>
+                  {fmt(chainTotals[c])}
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      <div style={{ flex: 1 }}/>
+
+      {!collapsed && (
+        <div style={{
+          padding: 10, border: "1px solid var(--bd-1)", borderRadius: 4,
+          background: "var(--bg-2)", fontSize: 11, color: "var(--tx-2)",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--tx-1)", marginBottom: 4 }}>
+            <Icon name="shield" size={11}/>
+            <span style={{ fontWeight: 600 }}>OWS policy active</span>
+          </div>
+          <div className="mono" style={{ fontSize: 10.5, color: "var(--tx-3)", lineHeight: 1.5 }}>
+            spend cap enforced<br/>
+            chain-locked at sign<br/>
+            session bounded
+          </div>
+        </div>
+      )}
+    </aside>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Footer                                                                    */
+/* -------------------------------------------------------------------------- */
+function Footer({ lastEvent }: { lastEvent: { type: string; payload: any } | null }) {
+  const live =
+    lastEvent?.type === "rebalance:start" ? "rebalancing now" :
+    lastEvent?.type === "rebalance:done" ? "idle · last just now" :
+    "idle";
+  return (
+    <footer style={{
+      height: 24, borderTop: "1px solid var(--bd-2)",
+      display: "flex", alignItems: "center", gap: 16, padding: "0 12px",
+      fontSize: 10.5, color: "var(--tx-3)", fontFamily: "var(--f-mono)",
+      flex: "0 0 auto", background: "var(--bg-1)",
+    }}>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+        <StatusDot kind="ok" pulse/> sse · /api/events
+      </span>
+      <span>{live}</span>
+      <span style={{ flex: 1 }}/>
+      <span style={{ color: "var(--tx-3)" }}>powered by Zerion CLI · MIT</span>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+        <Icon name="terminal" size={11}/> v0.1.0
+      </span>
+    </footer>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Baskets section                                                           */
+/* -------------------------------------------------------------------------- */
+type FilterKey = "all" | "active" | "paused" | "alerts";
+type ChainFilter = "all" | Chain;
+
+function BasketsTabSection({
+  baskets, portfolios, rebalanceHistories, expanded, toggleExpand,
+  onNew, onRefreshBasket, onRefreshList, allocBasketId, allocStage,
+}: {
+  baskets: Basket[] | null;
+  portfolios: Record<string, Portfolio>;
+  rebalanceHistories: Record<string, RebalanceResult[]>;
+  expanded: Record<string, boolean>;
+  toggleExpand: (id: string) => void;
+  onNew: () => void;
+  onRefreshBasket: (id: string) => Promise<void>;
+  onRefreshList: () => void;
+  allocBasketId: string | null;
+  allocStage: AllocStage;
+}) {
+  const [filter, setFilter] = useState<FilterKey>("all");
+  const [chain, setChain] = useState<ChainFilter>("all");
+
+  if (baskets === null) {
+    return (
+      <div style={{ padding: 16 }}>
+        <div className="skel" style={{ height: 96, marginBottom: 10 }}/>
+        <div className="skel" style={{ height: 96 }}/>
+      </div>
+    );
+  }
+
+  const filtered = baskets.filter((b) => {
+    if (filter === "active" && !b.enabled) return false;
+    if (filter === "paused" && b.enabled) return false;
+    if (filter === "alerts") {
+      // Treat "alerts" as: paused, or last rebalance denied/errored.
+      const last = rebalanceHistories[b.id]?.[0];
+      const flagged = !!last && (!last.guardOutcome.allow || last.swaps.some((s) => s.error));
+      if (!flagged) return false;
+    }
+    if (chain !== "all" && b.chain !== chain) return false;
+    return true;
+  });
+
+  return (
+    <div style={{ padding: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        <SegBar
+          value={filter}
+          onChange={setFilter}
+          options={[
+            { v: "all" as FilterKey,    l: "All",     c: baskets.length },
+            { v: "active" as FilterKey, l: "Active",  c: baskets.filter((b) => b.enabled).length },
+            { v: "paused" as FilterKey, l: "Paused",  c: baskets.filter((b) => !b.enabled).length },
+            { v: "alerts" as FilterKey, l: "Alerts" },
+          ]}
+        />
+        <SegBar
+          value={chain}
+          onChange={setChain}
+          options={[
+            { v: "all" as ChainFilter, l: "All chains" },
+            { v: "solana" as ChainFilter, l: "Solana", dot: chainColor("solana") },
+            { v: "base"   as ChainFilter, l: "Base",   dot: chainColor("base") },
+          ]}
+        />
+        <div style={{ flex: 1 }}/>
+        <Btn variant="ghost" leftIcon="refresh" size="sm" onClick={onRefreshList}>Refresh</Btn>
+        <Btn variant="primary" leftIcon="plus" onClick={onNew}>New basket</Btn>
+      </div>
+
+      {filtered.length === 0 ? (
+        <EmptyBaskets onNew={onNew}/>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {filtered.map((b) => (
+            <BasketCard
+              key={b.id}
+              basket={b}
+              portfolio={portfolios[b.id]}
+              history={rebalanceHistories[b.id]}
+              expanded={!!expanded[b.id]}
+              onToggle={() => toggleExpand(b.id)}
+              onRefreshBasket={() => onRefreshBasket(b.id)}
+              onChange={onRefreshList}
+              firstAllocStage={allocBasketId === b.id ? allocStage : null}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EmptyBaskets({ onNew }: { onNew: () => void }) {
+  return (
+    <div className="fade-in" style={{
+      border: "1px dashed var(--bd-2)", borderRadius: 6, padding: 32,
+      background: "linear-gradient(180deg, var(--bg-1), var(--bg-0))",
+      display: "grid", gridTemplateColumns: "1fr", gap: 24, alignItems: "center", minHeight: 260,
+    }}>
+      <div>
+        <div style={{
+          display: "inline-flex", alignItems: "center", gap: 8,
+          padding: "4px 10px", border: "1px solid var(--ac-bd)",
+          background: "var(--ac-bg)", color: "var(--ac)",
+          borderRadius: 3, fontSize: 10.5,
+          textTransform: "uppercase", letterSpacing: ".06em",
+          marginBottom: 14,
+        }}>
+          <StatusDot kind="ok" pulse/>Ready · agent unlocked
+        </div>
+        <h2 style={{ margin: "0 0 8px", fontSize: 22, fontWeight: 600, color: "var(--tx-0)", letterSpacing: "-.015em" }}>
+          Fund a wallet, then create your first basket.
+        </h2>
+        <p style={{ margin: "0 0 18px", color: "var(--tx-2)", fontSize: 13, maxWidth: 480 }}>
+          Send USDC plus a small amount of native gas to your agent wallet on Solana or Base.
+          Once funded, create a basket and the rebalancer signs its first allocation tick automatically.
+        </p>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Btn variant="primary" leftIcon="plus" onClick={onNew}>New basket</Btn>
+        </div>
+        <div style={{ marginTop: 22, display: "flex", gap: 18, fontSize: 11.5, color: "var(--tx-3)", flexWrap: "wrap" }}>
+          <Step n="1" label="Fund wallet" active/>
+          <Step n="2" label="Create basket"/>
+          <Step n="3" label="First allocation"/>
+          <Step n="4" label="Rebalances hourly"/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Step({ n, label, active }: { n: string; label: string; active?: boolean }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, color: active ? "var(--tx-0)" : "var(--tx-3)" }}>
+      <span className="mono" style={{
+        width: 18, height: 18, display: "inline-grid", placeItems: "center",
+        border: "1px solid " + (active ? "var(--ac)" : "var(--bd-2)"),
+        background: active ? "var(--ac-bg)" : "transparent",
+        color: active ? "var(--ac)" : "var(--tx-3)",
+        borderRadius: 3, fontSize: 10,
+      }}>
+        {n}
+      </span>
+      {label}
     </div>
   );
 }

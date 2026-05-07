@@ -95,6 +95,13 @@ export const api = {
     cached(`tokens:${chain}`, TTL_FOREVER, () =>
       request<{ tokens: TokenEntry[] }>(`/tokens?chain=${chain}`),
     ),
+  resolveCustomToken: async (chain: "base" | "solana", address: string) => {
+    const r = await request<{ token: TokenEntry }>(
+      `/tokens/resolve?chain=${chain}&address=${encodeURIComponent(address)}`,
+    );
+    invalidateCache(`tokens:${chain}`);
+    return r;
+  },
   listWallets: () =>
     cached("wallets", TTL_LONG, () => request<{ wallets: WalletInfo[] }>("/wallets")),
   walletHoldings: (name: string) =>
@@ -108,7 +115,11 @@ export const api = {
       }>(`/wallets/${encodeURIComponent(name)}/holdings`),
     ),
   listPolicies: () =>
-    cached("policies", TTL_LONG, () => request<{ policies: any[] }>("/agent/policies")),
+    cached("policies", TTL_LONG, () => request<{ policies: PolicySummary[] }>("/agent/policies")),
+  getPolicy: (id: string) =>
+    cached(`policy:${id}`, TTL_LONG, () =>
+      request<{ policy: PolicyDetail }>(`/agent/policies/${encodeURIComponent(id)}`),
+    ),
   listAgentTokens: () =>
     cached("agent-tokens", TTL_LONG, () => request<{ tokens: any[] }>("/agent/tokens")),
   getAuthorizedTelegramUsers: () =>
@@ -262,6 +273,32 @@ export interface Portfolio {
   byToken: Record<string, number>;
   currentWeights: Record<string, number>;
   fetchedAt: string;
+}
+
+/* ── OWS policies ─────────────────────────────────────────────────── */
+
+export type PolicyRule =
+  | { type: "allowed_chains"; chains: string[] }
+  | { type: "expires_at"; timestamp: number }
+  | { type: string; [k: string]: unknown };
+
+export interface PolicySummary {
+  id: string;
+  name: string;
+  rules: PolicyRule[];
+  hasExecutable: boolean;
+  createdAt?: string;
+}
+
+export interface PolicyDetail extends PolicySummary {
+  /** OWS executable script wrapper. */
+  executable?: string | null;
+  config?: {
+    scripts?: string[];
+    daily_tx_limit?: number;
+    token_name?: string;
+    allowed_addresses?: string[];
+  } | null;
 }
 
 export interface RebalanceResult {

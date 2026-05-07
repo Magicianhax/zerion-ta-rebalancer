@@ -1,20 +1,23 @@
-import { useEffect, useMemo, useState } from "react";
-import { Activity, ArrowRight, AlertCircle, Check, X as XIcon, ExternalLink, RefreshCw } from "lucide-react";
-import { api, type Basket, type RebalanceResult } from "../api.ts";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import { api, type Basket, type RebalanceResult, type Chain } from "../api.ts";
 import { fmtUsd, fmtRelative } from "../utils/format.ts";
+import {
+  ActionDot, Btn, ChainBadge, Icon, SegBar, TaScore, TokenChip,
+  type ActionKind,
+} from "./ui.tsx";
 
 interface Row extends RebalanceResult {
   basketName: string;
-  basketChain: "solana" | "base";
+  basketChain: Chain;
 }
 
-type Filter = "all" | "swaps" | "denied" | "no-action";
+type Filter = "all" | "swaps" | "denied" | "no-action" | "error";
 
 export default function ActivityView({ baskets }: { baskets: Basket[] }) {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
-  const [activeBasket, setActiveBasket] = useState<string>("all");
+  const [open, setOpen] = useState<Record<string, boolean>>({});
 
   const refresh = async () => {
     setLoading(true);
@@ -42,175 +45,238 @@ export default function ActivityView({ baskets }: { baskets: Basket[] }) {
     }
   };
 
-  useEffect(() => { refresh(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { refresh(); /* eslint-disable-next-line */ }, [baskets.length]);
+
+  const actionFor = (r: Row): ActionKind => {
+    if (!r.guardOutcome.allow) return "denied";
+    if (r.swaps.some((s) => s.error)) return "error";
+    if (r.swaps.length > 0) return "swaps";
+    return "no-action";
+  };
 
   const filtered = useMemo(() => {
     if (!rows) return null;
-    return rows.filter((r) => {
-      if (activeBasket !== "all" && r.basketId !== activeBasket) return false;
-      if (filter === "swaps") return r.guardOutcome.allow && r.swaps.length > 0;
-      if (filter === "denied") return !r.guardOutcome.allow;
-      if (filter === "no-action") return r.guardOutcome.allow && r.swaps.length === 0;
-      return true;
-    });
-  }, [rows, filter, activeBasket]);
+    if (filter === "all") return rows;
+    return rows.filter((r) => actionFor(r) === filter);
+  }, [rows, filter]);
 
-  const explorerUrl = (chain: "solana" | "base", hash: string) =>
+  const counts = useMemo(() => {
+    const c: Record<Filter, number> = { all: 0, swaps: 0, denied: 0, "no-action": 0, error: 0 };
+    if (!rows) return c;
+    c.all = rows.length;
+    for (const r of rows) c[actionFor(r)]++;
+    return c;
+  }, [rows]);
+
+  const explorerUrl = (chain: Chain, hash: string) =>
     chain === "solana" ? `https://solscan.io/tx/${hash}` : `https://basescan.org/tx/${hash}`;
 
+  const cols = "26px 110px 1.4fr 130px 90px 1fr 100px";
+
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold flex items-center gap-2">
-          <Activity className="w-5 h-5 text-accent" /> Activity
-        </h2>
-        <button
-          onClick={refresh}
-          disabled={loading}
-          className="bg-ink-700 hover:bg-ink-600 disabled:opacity-50 text-sm rounded-lg px-3 py-2 flex items-center gap-2 transition"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> Refresh
-        </button>
+    <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <h2 style={{ margin: 0, fontSize: 14, color: "var(--tx-0)", fontWeight: 600 }}>Activity</h2>
+        <span className="mono" style={{ fontSize: 11, color: "var(--tx-3)" }}>
+          · {filtered?.length ?? 0} event{(filtered?.length ?? 0) === 1 ? "" : "s"}
+        </span>
+        <span style={{ flex: 1 }}/>
+        <SegBar
+          value={filter}
+          onChange={setFilter}
+          options={[
+            { v: "all" as Filter,       l: "All",       c: counts.all },
+            { v: "swaps" as Filter,     l: "Swaps",     c: counts.swaps },
+            { v: "denied" as Filter,    l: "Denied",    c: counts.denied },
+            { v: "no-action" as Filter, l: "No-action", c: counts["no-action"] },
+            { v: "error" as Filter,     l: "Error",     c: counts.error },
+          ]}
+        />
+        <Btn size="sm" variant="ghost" leftIcon="refresh" onClick={refresh} disabled={loading}>
+          {loading ? "Loading…" : "Refresh"}
+        </Btn>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap gap-2 text-xs">
-        <FilterChip active={filter === "all"} onClick={() => setFilter("all")}>All</FilterChip>
-        <FilterChip active={filter === "swaps"} onClick={() => setFilter("swaps")}>Swaps</FilterChip>
-        <FilterChip active={filter === "denied"} onClick={() => setFilter("denied")}>Denied</FilterChip>
-        <FilterChip active={filter === "no-action"} onClick={() => setFilter("no-action")}>No action</FilterChip>
-        <div className="w-px h-5 bg-ink-700 mx-1" />
-        <select
-          value={activeBasket}
-          onChange={(e) => setActiveBasket(e.target.value)}
-          className="bg-ink-800 border border-ink-700 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-accent"
-        >
-          <option value="all">All baskets</option>
-          {baskets.map((b) => (
-            <option key={b.id} value={b.id}>{b.name}</option>
-          ))}
-        </select>
-      </div>
-
-      {filtered === null ? (
-        <div className="space-y-2">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="bg-ink-800 border border-ink-700 rounded-xl p-4 h-20 animate-pulse" />
-          ))}
+      <div style={{
+        border: "1px solid var(--bd-2)", borderRadius: 5,
+        background: "var(--bg-1)", overflow: "hidden",
+      }}>
+        <div className="t-row t-head" style={{ gridTemplateColumns: cols }}>
+          <span/>
+          <span>Time</span>
+          <span>Basket</span>
+          <span>Action</span>
+          <span style={{ textAlign: "right" }}>Swaps</span>
+          <span>Summary</span>
+          <span style={{ textAlign: "right" }}>Tx</span>
         </div>
-      ) : filtered.length === 0 ? (
-        <div className="border border-dashed border-ink-600 rounded-xl p-12 text-center">
-          <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-ink-700 flex items-center justify-center">
-            <Activity className="w-5 h-5 text-ink-400" />
+
+        {filtered === null ? (
+          <div style={{ padding: 16 }}>
+            <div className="skel" style={{ height: 36, marginBottom: 6 }}/>
+            <div className="skel" style={{ height: 36, marginBottom: 6 }}/>
+            <div className="skel" style={{ height: 36 }}/>
           </div>
-          <div className="text-ink-300 mb-1">Nothing yet</div>
-          <p className="text-xs text-ink-400 max-w-sm mx-auto">
-            Activity shows up here every time the cron fires or you trigger Rebalance now.
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {filtered.map((r, idx) => (
-            <div key={idx} className="bg-ink-800 border border-ink-700 rounded-xl overflow-hidden">
-              <div className="flex items-start gap-3 p-4">
-                <StatusIcon row={r} />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2 mb-1">
-                    <div className="font-medium text-sm truncate">
-                      {r.basketName}
-                      <span className="text-ink-400 font-normal text-xs ml-2 capitalize">{r.basketChain}</span>
-                    </div>
-                    <span className="text-xs text-ink-400 shrink-0 tabular-nums">{fmtRelative(r.startedAt)}</span>
-                  </div>
-                  <RowSummary row={r} explorerUrl={explorerUrl} />
-                </div>
-              </div>
+        ) : filtered.length === 0 ? (
+          <div style={{ padding: 32, textAlign: "center" }}>
+            <div style={{
+              width: 36, height: 36, margin: "0 auto 12px",
+              borderRadius: 999, background: "var(--bg-3)",
+              display: "grid", placeItems: "center", color: "var(--tx-3)",
+            }}>
+              <Icon name="activity" size={16}/>
             </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+            <div style={{ fontSize: 13, color: "var(--tx-1)", marginBottom: 4 }}>Nothing yet</div>
+            <p style={{ margin: 0, fontSize: 11.5, color: "var(--tx-3)", maxWidth: 360, marginInline: "auto" }}>
+              Events appear here every time the cron fires or you trigger a manual rebalance.
+            </p>
+          </div>
+        ) : (
+          filtered.map((r, idx) => {
+            const action = actionFor(r);
+            const key = `${r.basketId}-${r.startedAt}-${idx}`;
+            const isOpen = !!open[key];
+            const summary = summarize(r);
+            return (
+              <Fragment key={key}>
+                <div
+                  className="t-row"
+                  style={{ gridTemplateColumns: cols, cursor: "pointer" }}
+                  onClick={() => setOpen((o) => ({ ...o, [key]: !o[key] }))}
+                >
+                  <Icon name={isOpen ? "chevron-down" : "chevron-right"} size={11}/>
+                  <span className="mono" style={{ color: "var(--tx-2)", fontSize: 11 }}>
+                    {fmtRelative(r.startedAt)}
+                  </span>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                    <ChainBadge chain={r.basketChain} size="sm" withLabel={false}/>
+                    <span style={{
+                      color: "var(--tx-0)", fontSize: 12, fontWeight: 500,
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    }}>{r.basketName}</span>
+                  </span>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <ActionDot a={action}/>
+                    <span className="mono" style={{
+                      fontSize: 11.5,
+                      color: action === "error" ? "var(--danger)" :
+                             action === "denied" ? "var(--warn)" :
+                             action === "swaps" ? "var(--ac)" : "var(--tx-2)",
+                    }}>{action}</span>
+                  </span>
+                  <span className="num" style={{ textAlign: "right", color: r.swaps.length ? "var(--tx-0)" : "var(--tx-3)" }}>
+                    {r.swaps.length}
+                  </span>
+                  <span style={{
+                    color: "var(--tx-1)", fontSize: 11.5,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>{summary}</span>
+                  <span className="mono" style={{
+                    textAlign: "right", color: "var(--tx-3)", fontSize: 10.5,
+                  }}>{r.swaps.filter((s) => s.txHash).length || "—"}</span>
+                </div>
 
-function FilterChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`px-3 py-1 rounded-md transition border ${
-        active
-          ? "bg-accent text-white border-accent"
-          : "bg-ink-800 border-ink-700 text-ink-300 hover:bg-ink-700"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
-function StatusIcon({ row }: { row: Row }) {
-  if (!row.guardOutcome.allow) {
-    return (
-      <div className="w-8 h-8 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center shrink-0">
-        <AlertCircle className="w-4 h-4 text-amber-400" />
+                {isOpen && (
+                  <div className="fade-in" style={{
+                    padding: "12px 16px 14px 42px",
+                    borderBottom: "1px solid var(--bd-1)",
+                    background: "var(--bg-2)",
+                    display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16,
+                  }}>
+                    <div>
+                      <div style={{ fontSize: 10.5, color: "var(--tx-3)", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6 }}>
+                        TA scores
+                      </div>
+                      {r.proposal.scores.length === 0 ? (
+                        <span className="mono" style={{ color: "var(--tx-3)", fontSize: 11 }}>—</span>
+                      ) : (
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          {r.proposal.scores.map((s) => (
+                            <div
+                              key={s.symbol}
+                              style={{
+                                display: "inline-flex", alignItems: "center", gap: 6,
+                                padding: "3px 6px 3px 4px",
+                                background: "var(--bg-1)", border: "1px solid var(--bd-2)",
+                                borderRadius: 3,
+                              }}
+                            >
+                              <TokenChip sym={s.symbol} size={14}/>
+                              <span className="mono" style={{ fontSize: 11, color: "var(--tx-1)" }}>{s.symbol}</span>
+                              <TaScore score={Math.round(s.score)}/>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {!r.guardOutcome.allow && (
+                        <div style={{
+                          marginTop: 10, fontSize: 11, color: "var(--warn)",
+                          fontFamily: "var(--f-mono)", lineHeight: 1.5,
+                        }}>
+                          {r.guardOutcome.reason}
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 10.5, color: "var(--tx-3)", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6 }}>
+                        Swaps
+                      </div>
+                      {r.swaps.length === 0 ? (
+                        <span className="mono" style={{ color: "var(--tx-3)", fontSize: 11 }}>—</span>
+                      ) : (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          {r.swaps.map((s, i) => (
+                            <div key={i} style={{
+                              display: "flex", alignItems: "center", gap: 8,
+                              fontSize: 11, color: "var(--tx-1)",
+                              padding: "4px 6px",
+                              background: "var(--bg-1)", border: "1px solid var(--bd-1)",
+                              borderRadius: 3,
+                            }}>
+                              <span className="mono" style={{ color: "var(--tx-0)" }}>{s.plan.fromToken}</span>
+                              <Icon name="chevron-right" size={11}/>
+                              <span className="mono" style={{ color: "var(--tx-0)" }}>{s.plan.toToken}</span>
+                              <span className="num" style={{ color: "var(--tx-2)" }}>{fmtUsd(s.plan.estimatedUsd)}</span>
+                              <span style={{ flex: 1 }}/>
+                              {s.error ? (
+                                <span style={{ color: "var(--danger)", fontSize: 10.5 }}>
+                                  {s.error.split("\n")[0]?.slice(0, 60) ?? "failed"}
+                                </span>
+                              ) : s.txHash ? (
+                                <a
+                                  href={explorerUrl(r.basketChain, s.txHash)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  style={{
+                                    display: "inline-flex", alignItems: "center", gap: 4,
+                                    color: "var(--ac)", textDecoration: "none",
+                                    fontFamily: "var(--f-mono)", fontSize: 10.5,
+                                  }}
+                                >
+                                  {s.txHash.slice(0, 8)}…
+                                  <Icon name="external" size={10}/>
+                                </a>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </Fragment>
+            );
+          })
+        )}
       </div>
-    );
-  }
-  if (row.swaps.length === 0) {
-    return (
-      <div className="w-8 h-8 rounded-full bg-ink-700 border border-ink-600 flex items-center justify-center shrink-0">
-        <span className="w-1.5 h-1.5 rounded-full bg-ink-400" />
-      </div>
-    );
-  }
-  const anyError = row.swaps.some((s) => s.error);
-  return (
-    <div
-      className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 border ${
-        anyError ? "bg-red-500/10 border-red-500/30" : "bg-emerald-500/10 border-emerald-500/30"
-      }`}
-    >
-      {anyError ? <XIcon className="w-4 h-4 text-red-400" /> : <Check className="w-4 h-4 text-emerald-400" />}
     </div>
   );
 }
 
-function RowSummary({
-  row,
-  explorerUrl,
-}: {
-  row: Row;
-  explorerUrl: (chain: "solana" | "base", hash: string) => string;
-}) {
-  if (!row.guardOutcome.allow) {
-    return <div className="text-xs text-amber-400/90 leading-relaxed">{row.guardOutcome.reason}</div>;
-  }
-  if (row.swaps.length === 0) {
-    return <div className="text-xs text-ink-400">No action — basket within tolerance</div>;
-  }
-  return (
-    <div className="space-y-1">
-      {row.swaps.map((s, i) => (
-        <div key={i} className="text-xs flex items-center gap-2 text-ink-300">
-          <span className="font-medium">{s.plan.fromToken}</span>
-          <ArrowRight className="w-3 h-3 text-ink-500" />
-          <span className="font-medium">{s.plan.toToken}</span>
-          <span className="text-ink-400 tabular-nums">{fmtUsd(s.plan.estimatedUsd)}</span>
-          {s.error ? (
-            <span className="text-red-400 ml-1 truncate">· {s.error.split("\n")[0]?.slice(0, 80) ?? "failed"}</span>
-          ) : s.txHash ? (
-            <a
-              href={explorerUrl(row.basketChain, s.txHash)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-accent hover:text-white inline-flex items-center gap-1 ml-1"
-            >
-              <code className="font-mono text-[10px]">{s.txHash.slice(0, 8)}…</code>
-              <ExternalLink className="w-2.5 h-2.5" />
-            </a>
-          ) : null}
-        </div>
-      ))}
-    </div>
-  );
+function summarize(r: RebalanceResult): string {
+  if (!r.guardOutcome.allow) return r.guardOutcome.reason;
+  if (r.swaps.length === 0) return "Within tolerance — no action";
+  return r.swaps
+    .map((s) => `${s.plan.fromToken} → ${s.plan.toToken} ${fmtUsd(s.plan.estimatedUsd)}`)
+    .join("; ");
 }

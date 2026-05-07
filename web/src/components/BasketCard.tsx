@@ -1,31 +1,57 @@
-import { useState } from "react";
-import { Pause, Play, RefreshCw, Trash2, ChevronDown, ChevronUp, Wallet } from "lucide-react";
+import { useMemo, useState } from "react";
 import { api, type Basket, type Portfolio, type RebalanceResult } from "../api.ts";
 import { fmtUsd, fmtRelative } from "../utils/format.ts";
+import {
+  ChainBadge, ColCell, DriftBar, Icon, IconBtn,
+  Tag, TaScore, TokenChip, WeightBar, GuardRow,
+  AllocationDonut, ActionDot,
+  type ActionKind,
+} from "./ui.tsx";
+import PolicyCard from "./PolicyCard.tsx";
+import type { AllocStage } from "./FirstAllocOverlay.tsx";
 
 interface Props {
   basket: Basket;
-  /** Portfolio + history come from the parent so we don't refetch on every mount. */
   portfolio?: Portfolio;
   history?: RebalanceResult[];
-  /** Refresh just this basket's portfolio + history (used by the per-card refresh button). */
+  expanded: boolean;
+  onToggle: () => void;
   onRefreshBasket: () => Promise<void>;
-  /** Refresh the basket list (called after pause/resume/delete). */
   onChange: () => void;
+  firstAllocStage: AllocStage | null;
 }
 
-export default function BasketCard({ basket, portfolio, history, onRefreshBasket, onChange }: Props) {
-  const [expanded, setExpanded] = useState(false);
+const DRIFT_TOLERANCE = 3.0;
+
+export default function BasketCard({
+  basket, portfolio, history, expanded,
+  onToggle, onRefreshBasket, onChange, firstAllocStage,
+}: Props) {
   const [busy, setBusy] = useState(false);
-  const [refreshingBalance, setRefreshingBalance] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const last = history?.[0];
+
+  // Drift % across the basket: sum |current - target| / 2.
+  const drift = useMemo(() => {
+    if (!last) return 0;
+    const target = last.proposal.targetWeights;
+    const current = last.proposal.currentWeights;
+    const symbols = new Set([...Object.keys(target), ...Object.keys(current)]);
+    let sum = 0;
+    for (const s of symbols) sum += Math.abs((current[s] ?? 0) - (target[s] ?? 0));
+    return (sum / 2) * 100;
+  }, [last]);
+
+  const tone: "ok" | "warn" | "paused" =
+    !basket.enabled ? "paused" :
+    last && !last.guardOutcome.allow ? "warn" :
+    drift > DRIFT_TOLERANCE ? "warn" : "ok";
 
   const refreshBalance = async () => {
-    setRefreshingBalance(true);
+    setRefreshing(true);
     try { await onRefreshBasket(); }
-    finally { setRefreshingBalance(false); }
+    finally { setRefreshing(false); }
   };
-
-  const last = history?.[0];
 
   const trigger = async () => {
     setBusy(true);
@@ -52,169 +78,285 @@ export default function BasketCard({ basket, portfolio, history, onRefreshBasket
   const remove = async () => {
     if (!confirm(`Delete basket "${basket.name}"? This does not touch your wallet — just removes it from the dashboard.`)) return;
     setBusy(true);
-    try { await api.deleteBasket(basket.id); onChange(); } finally { setBusy(false); }
+    try {
+      await api.deleteBasket(basket.id);
+      onChange();
+    } finally { setBusy(false); }
   };
 
+  const lastAction: ActionKind = !last
+    ? "no-action"
+    : !last.guardOutcome.allow
+    ? "denied"
+    : last.swaps.some((s) => s.error)
+    ? "error"
+    : last.swaps.length > 0
+    ? "swaps"
+    : "no-action";
+
+  const accentColor =
+    tone === "ok" ? "var(--ac)" :
+    tone === "warn" ? "var(--warn)" :
+    "var(--tx-3)";
+
   return (
-    <div className="bg-ink-800 border border-ink-700 rounded-xl overflow-hidden hover:border-ink-600 transition">
-      <div className="p-5">
-        <div className="flex items-start justify-between mb-4">
-          <div className="min-w-0">
-            <h3 className="font-semibold text-base truncate">{basket.name}</h3>
-            <div className="text-xs text-ink-400 mt-0.5 capitalize">
-              {basket.chain} · {fmtUsd(basket.budgetUsd)} budget · {basket.tokens.length} tokens
+    <article style={{
+      border: "1px solid var(--bd-2)", borderRadius: 5,
+      background: "var(--bg-1)", overflow: "hidden", position: "relative",
+    }}>
+      <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 2, background: accentColor }}/>
+
+      {/* Header row */}
+      <div
+        className="basket-header"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1.4fr 1fr 1fr 1fr 1fr auto",
+          alignItems: "center",
+          padding: "12px 16px", gap: 12, cursor: "pointer",
+        }}
+        onClick={onToggle}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+          <Icon name={expanded ? "chevron-down" : "chevron-right"} size={12}/>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 14, color: "var(--tx-0)", fontWeight: 600, letterSpacing: "-.01em" }}>{basket.name}</span>
+              <ChainBadge chain={basket.chain} size="sm"/>
+              {tone === "paused" && <Tag tone="muted">paused</Tag>}
+              {tone === "warn" && <Tag tone="warn">drift</Tag>}
+              {tone === "ok" && <Tag tone="accent">healthy</Tag>}
             </div>
-          </div>
-          <div
-            className={`text-[11px] uppercase tracking-wider font-medium px-2 py-1 rounded-md flex items-center gap-1.5 ${
-              basket.enabled
-                ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                : "bg-ink-700 text-ink-400 border border-ink-600"
-            }`}
-          >
-            <span className={`w-1.5 h-1.5 rounded-full ${basket.enabled ? "bg-emerald-400 animate-pulse" : "bg-ink-500"}`} />
-            {basket.enabled ? "active" : "paused"}
+            <div className="mono" style={{ fontSize: 10.5, color: "var(--tx-3)" }}>
+              {basket.id} · {basket.tokens.length} tokens · 1h · bias {basket.taBias.toFixed(2)}
+            </div>
           </div>
         </div>
 
-        <div className="mb-4 flex items-center justify-between text-xs bg-ink-900/40 border border-ink-700 rounded-lg px-3 py-2.5">
-          <div className="flex items-center gap-2 text-ink-400">
-            <Wallet className="w-3.5 h-3.5" />
-            <span>Wallet balance</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-ink-100 tabular-nums">
-              {portfolio ? fmtUsd(portfolio.totalUsd) : "—"}
+        <ColCell
+          label="Value"
+          main={portfolio ? fmtUsd(portfolio.totalUsd) : "—"}
+          sub={<span style={{ color: "var(--tx-2)" }}>{fmtUsd(basket.budgetUsd)} budget</span>}
+        />
+
+        <ColCell
+          label="Drift"
+          main={
+            <span style={{ color: drift > DRIFT_TOLERANCE ? "var(--warn)" : "var(--tx-0)" }}>
+              {last ? `${drift.toFixed(2)}%` : "—"}
             </span>
-            <button
-              onClick={refreshBalance}
-              disabled={refreshingBalance}
-              className="p-1 hover:bg-ink-700 rounded transition disabled:opacity-50"
-              title="Refresh balance"
-            >
-              <RefreshCw className={`w-3 h-3 ${refreshingBalance ? "animate-spin" : ""}`} />
-            </button>
-          </div>
-        </div>
+          }
+          sub={<DriftBar pct={drift / DRIFT_TOLERANCE}/>}
+        />
 
-        <div className="space-y-1.5">
-          {basket.tokens.map((t) => {
-            const sym = t.symbol.toUpperCase();
-            const current =
-              portfolio?.currentWeights[sym] ??
-              last?.proposal.currentWeights[sym] ??
-              0;
-            const target = last?.proposal.targetWeights[sym] ?? t.initialWeight;
-            const usd = portfolio?.byToken[sym];
-            return (
-              <div key={t.symbol} className="text-xs">
-                <div className="flex justify-between mb-1">
-                  <span className="font-medium text-ink-100">
-                    {t.symbol}
-                    {usd != null && (
-                      <span className="text-ink-400 font-normal ml-2 tabular-nums">{fmtUsd(usd)}</span>
-                    )}
-                  </span>
-                  <span className="text-ink-400 tabular-nums">
-                    {(current * 100).toFixed(1)}% → <span className="text-accent font-medium">{(target * 100).toFixed(1)}%</span>
-                  </span>
-                </div>
-                <div className="h-1.5 bg-ink-700 rounded-full overflow-hidden relative">
-                  {current > 0 && (
-                    <div
-                      className="absolute inset-y-0 left-0 bg-ink-500/60 transition-all"
-                      style={{ width: `${current * 100}%` }}
-                    />
-                  )}
-                  <div
-                    className="absolute inset-y-0 left-0 bg-accent transition-all duration-500"
-                    style={{ width: `${target * 100}%` }}
-                  />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {last && (
-          <div className="mt-4 pt-4 border-t border-ink-700 text-xs">
-            <div className="flex items-center justify-between">
-              <span className="text-ink-400">Last tick · {fmtRelative(last.startedAt)}</span>
-              <span
-                className={`font-medium ${
-                  last.guardOutcome.allow
-                    ? last.swaps.length > 0
-                      ? "text-emerald-400"
-                      : "text-ink-300"
-                    : "text-amber-400"
-                }`}
-              >
-                {last.guardOutcome.allow
-                  ? last.swaps.length > 0
-                    ? `${last.swaps.length} swap${last.swaps.length === 1 ? "" : "s"}`
-                    : "no action"
-                  : "denied"}
+        <ColCell
+          label="Last rebalance"
+          main={
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <ActionDot a={lastAction}/>
+              <span className="mono" style={{ fontSize: 12, color: "var(--tx-0)" }}>
+                {last
+                  ? lastAction === "swaps"
+                    ? `${last.swaps.length} swap${last.swaps.length > 1 ? "s" : ""}`
+                    : lastAction
+                  : "queued"}
               </span>
-            </div>
-            {!last.guardOutcome.allow && (
-              <p className="text-amber-400/80 mt-1.5 leading-relaxed">{last.guardOutcome.reason}</p>
-            )}
-          </div>
-        )}
+            </span>
+          }
+          sub={<span style={{ color: "var(--tx-2)" }}>{last ? fmtRelative(last.startedAt) : "—"}</span>}
+        />
 
-        <div className="mt-4 flex items-center gap-2">
-          <button
-            onClick={trigger}
-            disabled={busy}
-            className="flex-1 bg-ink-700 hover:bg-ink-600 disabled:opacity-50 text-sm rounded-lg py-2 px-3 flex items-center justify-center gap-2 transition"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${busy ? "animate-spin" : ""}`} /> Rebalance now
-          </button>
-          <button
-            onClick={togglePause}
-            disabled={busy}
-            className="bg-ink-700 hover:bg-ink-600 disabled:opacity-50 rounded-lg p-2 transition"
-            title={basket.enabled ? "Pause" : "Resume"}
-          >
-            {basket.enabled ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-          </button>
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="bg-ink-700 hover:bg-ink-600 rounded-lg p-2 transition"
-            title={expanded ? "Collapse" : "Expand"}
-          >
-            {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-          </button>
-          <button
-            onClick={remove}
-            disabled={busy}
-            className="bg-ink-700 hover:bg-red-900/40 hover:text-red-300 disabled:opacity-50 rounded-lg p-2 transition"
-            title="Delete"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
+        <ColCell
+          label="Next tick"
+          main={
+            <span className="mono" style={{ fontSize: 12, color: !basket.enabled ? "var(--tx-3)" : "var(--tx-0)" }}>
+              {basket.enabled ? "next hour" : "paused"}
+            </span>
+          }
+          sub={<span className="mono" style={{ color: "var(--tx-3)" }}>cron · 1h</span>}
+        />
+
+        <div style={{ display: "flex", gap: 4 }} onClick={(e) => e.stopPropagation()}>
+          <IconBtn icon="refresh" title="Refresh balance" onClick={refreshBalance} disabled={refreshing}/>
+          <IconBtn icon={basket.enabled ? "pause" : "play"} title={basket.enabled ? "Pause" : "Resume"} onClick={togglePause} active={!basket.enabled} disabled={busy}/>
+          <IconBtn icon="bolt" title="Rebalance now" onClick={trigger} disabled={busy}/>
+          <IconBtn icon="trash" title="Delete" onClick={remove} disabled={busy}/>
         </div>
       </div>
 
-      {expanded && history && (
-        <div className="border-t border-ink-700 bg-ink-900/40 p-5">
-          <h4 className="text-xs uppercase tracking-wide text-ink-400 mb-3">Recent rebalances</h4>
-          {history.length === 0 ? (
-            <p className="text-xs text-ink-400">No rebalances yet.</p>
-          ) : (
-            <div className="space-y-2">
-              {history.map((r, i) => (
-                <div key={i} className="text-xs flex items-center justify-between border border-ink-700 rounded-lg px-3 py-2">
-                  <span className="text-ink-300">{new Date(r.startedAt).toLocaleString()}</span>
-                  <span className={r.guardOutcome.allow ? "text-emerald-400" : "text-amber-400"}>
-                    {r.guardOutcome.allow ? `${r.swaps.length} swap(s)` : "denied"}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
+      {expanded && (
+        <div className="fade-in" style={{ borderTop: "1px solid var(--bd-1)", background: "var(--bg-2)" }}>
+          {firstAllocStage && <FirstAllocStrip stage={firstAllocStage}/>}
+          <div className="basket-expanded" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 280px", gap: 0 }}>
+            <BasketTokenTable basket={basket} portfolio={portfolio} history={history}/>
+            <SidePanel basket={basket} drift={drift} history={history}/>
+          </div>
         </div>
       )}
+    </article>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Token table                                                               */
+/* -------------------------------------------------------------------------- */
+function BasketTokenTable({ basket, portfolio, history }: { basket: Basket; portfolio?: Portfolio; history?: RebalanceResult[] }) {
+  const last = history?.[0];
+  const rows = basket.tokens.map((t) => {
+    const sym = t.symbol.toUpperCase();
+    const target = (last?.proposal.targetWeights[sym] ?? t.initialWeight) * 100;
+    const current = (portfolio?.currentWeights[sym] ?? last?.proposal.currentWeights[sym] ?? 0) * 100;
+    const score = last?.proposal.scores.find((s) => s.symbol.toUpperCase() === sym);
+    const ta = Math.round(score?.score ?? 50);
+    const value = portfolio?.byToken[sym] ?? 0;
+    return { sym, target, current, delta: current - target, ta, value };
+  });
+
+  const cols = "1.6fr 80px 90px 90px 1fr 90px 110px";
+
+  return (
+    <div>
+      <div className="t-row t-head" style={{ gridTemplateColumns: cols }}>
+        <span>Token</span>
+        <span style={{ textAlign: "right" }}>Target</span>
+        <span style={{ textAlign: "right" }}>Current</span>
+        <span style={{ textAlign: "right" }}>Δ</span>
+        <span/>
+        <span style={{ textAlign: "right" }}>TA score</span>
+        <span style={{ textAlign: "right" }}>Value</span>
+      </div>
+      {rows.map((r) => (
+        <TokenRow key={r.sym} row={r} cols={cols}/>
+      ))}
+      <div style={{ padding: "10px 16px", display: "flex", alignItems: "center", gap: 10, borderTop: "1px solid var(--bd-1)" }}>
+        <span style={{ fontSize: 10.5, color: "var(--tx-3)", textTransform: "uppercase", letterSpacing: ".06em" }}>Last</span>
+        <span className="mono" style={{ fontSize: 11.5, color: "var(--tx-1)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {last && !last.guardOutcome.allow
+            ? last.guardOutcome.reason
+            : last && last.swaps.length === 0
+            ? "Within tolerance"
+            : last && last.swaps.length > 0
+            ? `${last.swaps.length} swap${last.swaps.length > 1 ? "s" : ""} executed`
+            : "First allocation pending"}
+        </span>
+        <span className="mono" style={{ fontSize: 10.5, color: "var(--tx-3)" }}>
+          {last ? fmtRelative(last.startedAt) : "—"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function TokenRow({ row, cols }: {
+  row: { sym: string; target: number; current: number; delta: number; ta: number; value: number };
+  cols: string;
+}) {
+  return (
+    <div className="t-row" style={{ gridTemplateColumns: cols }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+        <TokenChip sym={row.sym} size={20}/>
+        <span className="mono" style={{ color: "var(--tx-0)", fontSize: 12, fontWeight: 600 }}>{row.sym}</span>
+      </div>
+      <span className="num" style={{ textAlign: "right", color: "var(--tx-1)" }}>{row.target.toFixed(1)}%</span>
+      <span className="num" style={{ textAlign: "right", color: "var(--tx-0)" }}>{row.current.toFixed(1)}%</span>
+      <span className="num" style={{ textAlign: "right", color: Math.abs(row.delta) > 1 ? "var(--warn)" : "var(--tx-2)" }}>
+        {row.delta > 0 ? "+" : ""}{row.delta.toFixed(1)}
+      </span>
+      <WeightBar target={row.target} current={row.current}/>
+      <div style={{ textAlign: "right", display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 6 }}>
+        <TaScore score={row.ta}/>
+      </div>
+      <span className="num" style={{ textAlign: "right", color: "var(--tx-1)" }}>{fmtUsd(row.value)}</span>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Side panel — donut + guards + OWS                                         */
+/* -------------------------------------------------------------------------- */
+function SidePanel({ basket, drift, history }: { basket: Basket; drift: number; history?: RebalanceResult[] }) {
+  const last = history?.[0];
+
+  // Trades-per-day count (rough): real (allow + swaps>0) rebalances in last 24h.
+  const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+  const tradesToday = (history ?? []).filter(
+    (r) => r.guardOutcome.allow && r.swaps.length > 0 && new Date(r.startedAt).getTime() > dayAgo,
+  ).length;
+
+  // Cooldown — minutes since the last rebalance attempt.
+  const cooldownMin = last
+    ? Math.max(0, Math.round((Date.now() - new Date(last.startedAt).getTime()) / 60000))
+    : 0;
+
+  const slices = basket.tokens.map((t) => ({
+    sym: t.symbol.toUpperCase(),
+    weight: (last?.proposal.targetWeights[t.symbol.toUpperCase()] ?? t.initialWeight) * 100,
+  }));
+
+  return (
+    <div style={{ borderLeft: "1px solid var(--bd-1)", padding: 16 }}>
+      <div style={{ fontSize: 10.5, color: "var(--tx-3)", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 10 }}>
+        Allocation
+      </div>
+      <AllocationDonut slices={slices}/>
+
+      <div style={{ marginTop: 14, fontSize: 10.5, color: "var(--tx-3)", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6 }}>
+        Guards
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <GuardRow name={`drift ≤ ${DRIFT_TOLERANCE.toFixed(2)}%`} status={drift <= DRIFT_TOLERANCE ? "ok" : "warn"} value={`${drift.toFixed(2)}%`}/>
+        <GuardRow name="cooldown ≥ 15m" status={cooldownMin >= 15 || !last ? "ok" : "warn"} value={last ? `${cooldownMin}m` : "—"}/>
+        <GuardRow name="trades/day ≤ 12" status={tradesToday <= 12 ? "ok" : "warn"} value={`${tradesToday} / 12`}/>
+        <GuardRow name="quote = USDC" status="ok" value={basket.quoteToken}/>
+      </div>
+
+      <div style={{
+        marginTop: 14, fontSize: 10.5, color: "var(--tx-3)",
+        textTransform: "uppercase", letterSpacing: ".06em",
+        marginBottom: 6, display: "flex", justifyContent: "space-between",
+      }}>
+        <span>OWS policy</span>
+        <span style={{ color: "var(--ac)", textTransform: "none", letterSpacing: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <Icon name="shield" size={10}/> with keys
+        </span>
+      </div>
+      <PolicyCard policyId={basket.policyId}/>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  First-allocation strip — banner inside the expanded card while the        */
+/*  initial swap pipeline runs.                                               */
+/* -------------------------------------------------------------------------- */
+function FirstAllocStrip({ stage }: { stage: AllocStage }) {
+  const stages: Array<{ k: AllocStage; label: string }> = [
+    { k: "queued",   label: "Queued for first allocation" },
+    { k: "quoting",  label: "Computing TA scores · routing quotes" },
+    { k: "signing",  label: "Signing through OWS policy…" },
+    { k: "swapping", label: "Submitting swaps to RPC" },
+    { k: "settling", label: "Settling on-chain" },
+    { k: "done",     label: "Allocation complete" },
+  ];
+  const idx = Math.max(0, stages.findIndex((s) => s.k === stage));
+  return (
+    <div className="fade-in" style={{
+      padding: "10px 16px", borderBottom: "1px solid var(--bd-1)",
+      background: "color-mix(in oklab, var(--ac) 6%, var(--bg-2))",
+      display: "flex", alignItems: "center", gap: 10,
+    }}>
+      <span className="dot-pulse" style={{ width: 8, height: 8, borderRadius: 999, background: "var(--ac)", boxShadow: "0 0 10px var(--ac)" }}/>
+      <span className="mono" style={{ fontSize: 11.5, color: "var(--tx-0)" }}>{stages[idx]?.label}</span>
+      <div style={{ flex: 1, display: "flex", gap: 4 }}>
+        {stages.map((s, i) => (
+          <div key={s.k} style={{
+            flex: 1, height: 3, borderRadius: 2,
+            background: i <= idx ? "var(--ac)" : "var(--bd-2)",
+            transition: "background .3s",
+          }}/>
+        ))}
+      </div>
+      <span className="mono" style={{ fontSize: 10.5, color: "var(--tx-3)" }}>{idx + 1}/{stages.length}</span>
     </div>
   );
 }
