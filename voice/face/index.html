@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no" />
+  <title>Bablu</title>
+  <link rel="stylesheet" href="./face.css" />
+</head>
+<body>
+  <main class="screen" data-state="idle">
+    <!-- Bablu's face IS the LCD. Inline SVG so curves are crisp and
+         features morph smoothly between states. Original art only. -->
+    <svg class="bablu" viewBox="0 0 800 480" preserveAspectRatio="xMidYMid slice"
+         xmlns="http://www.w3.org/2000/svg" aria-label="Bablu's face">
+      <defs>
+        <!-- skin: warm green, lighter at top-center where light hits -->
+        <radialGradient id="skin" cx="50%" cy="40%" r="75%">
+          <stop offset="0%"   stop-color="#c8ea8e" />
+          <stop offset="55%"  stop-color="#9ed171" />
+          <stop offset="100%" stop-color="#6ea945" />
+        </radialGradient>
+
+        <!-- sclera (eye white): off-white, faint warm tint -->
+        <radialGradient id="sclera" cx="50%" cy="40%" r="75%">
+          <stop offset="0%"   stop-color="#fffdf3" />
+          <stop offset="100%" stop-color="#e9e3cd" />
+        </radialGradient>
+
+        <!-- iris: dark with subtle blue-black depth, lighter top edge -->
+        <radialGradient id="iris" cx="50%" cy="40%" r="65%">
+          <stop offset="0%"   stop-color="#3b3a4a" />
+          <stop offset="60%"  stop-color="#15151c" />
+          <stop offset="100%" stop-color="#000000" />
+        </radialGradient>
+
+        <!-- nose: soft tonal highlight + shadow -->
+        <radialGradient id="nose" cx="40%" cy="35%" r="80%">
+          <stop offset="0%"   stop-color="#88b25c" />
+          <stop offset="100%" stop-color="#4f7a30" />
+        </radialGradient>
+
+        <!-- cheek blush -->
+        <radialGradient id="cheek" cx="50%" cy="50%" r="50%">
+          <stop offset="0%"   stop-color="rgba(255, 130, 130, 0.95)" />
+          <stop offset="65%"  stop-color="rgba(255, 130, 130, 0.45)" />
+          <stop offset="100%" stop-color="rgba(255, 130, 130, 0)" />
+        </radialGradient>
+
+        <!-- soft drop shadow under features -->
+        <filter id="ds" x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur in="SourceAlpha" stdDeviation="3" />
+          <feOffset dy="3" result="offset" />
+          <feComponentTransfer><feFuncA type="linear" slope="0.35" /></feComponentTransfer>
+          <feMerge>
+            <feMergeNode />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+
+        <!-- subtle skin texture (very low opacity noise) -->
+        <filter id="texture" x="0" y="0" width="100%" height="100%">
+          <feTurbulence baseFrequency="0.85" numOctaves="2" seed="3" />
+          <feColorMatrix values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.06 0" />
+          <feComposite in2="SourceGraphic" operator="in" />
+        </filter>
+
+        <!-- shape libraries: each path uses identical M/Q/Q/Z commands so
+             CSS `d` transitions interpolate smoothly between states. -->
+      </defs>
+
+      <!-- background skin -->
+      <rect width="800" height="480" fill="url(#skin)" />
+      <rect width="800" height="480" fill="url(#skin)" filter="url(#texture)" />
+
+      <!-- subtle vignette/inner highlight at top -->
+      <ellipse cx="400" cy="-40" rx="500" ry="200" fill="white" opacity="0.08" />
+
+      <!-- cheeks -->
+      <ellipse class="cheek cheek-left"  cx="140" cy="320" rx="60" ry="42" fill="url(#cheek)" />
+      <ellipse class="cheek cheek-right" cx="660" cy="320" rx="60" ry="42" fill="url(#cheek)" />
+
+      <!-- LEFT EYE — three overlapping layers, CSS toggles which is visible -->
+      <g class="eye eye-left" filter="url(#ds)">
+        <!-- 1. open eye (default) -->
+        <g class="eye-open">
+          <ellipse class="sclera" cx="260" cy="210" rx="105" ry="115" fill="url(#sclera)"
+                   stroke="#15151c" stroke-width="7" />
+          <g class="iris-grp">
+            <ellipse class="iris"  cx="260" cy="220" rx="64" ry="72" fill="url(#iris)" />
+            <circle  class="hl-primary"   cx="240" cy="190" r="20" fill="#fffdf3" opacity="0.96" />
+            <circle  class="hl-secondary" cx="282" cy="244" r="9"  fill="#fffdf3" opacity="0.75" />
+          </g>
+        </g>
+        <!-- 2. smile arc ^ for happy -->
+        <path class="eye-arc-smile" d="M 165 250 Q 260 130 355 250"
+              stroke="#15151c" stroke-width="16" fill="none" stroke-linecap="round" />
+        <!-- 3. flat line — for sleeping -->
+        <path class="eye-arc-flat" d="M 175 215 L 345 215"
+              stroke="#15151c" stroke-width="14" fill="none" stroke-linecap="round" />
+      </g>
+
+      <!-- RIGHT EYE -->
+      <g class="eye eye-right" filter="url(#ds)">
+        <g class="eye-open">
+          <ellipse class="sclera" cx="540" cy="210" rx="105" ry="115" fill="url(#sclera)"
+                   stroke="#15151c" stroke-width="7" />
+          <g class="iris-grp">
+            <ellipse class="iris"  cx="540" cy="220" rx="64" ry="72" fill="url(#iris)" />
+            <circle  class="hl-primary"   cx="520" cy="190" r="20" fill="#fffdf3" opacity="0.96" />
+            <circle  class="hl-secondary" cx="562" cy="244" r="9"  fill="#fffdf3" opacity="0.75" />
+          </g>
+        </g>
+        <path class="eye-arc-smile" d="M 445 250 Q 540 130 635 250"
+              stroke="#15151c" stroke-width="16" fill="none" stroke-linecap="round" />
+        <path class="eye-arc-flat" d="M 455 215 L 625 215"
+              stroke="#15151c" stroke-width="14" fill="none" stroke-linecap="round" />
+      </g>
+
+      <!-- NOSE -->
+      <g class="nose-grp" filter="url(#ds)">
+        <ellipse class="nose" cx="400" cy="305" rx="22" ry="17" fill="url(#nose)" />
+        <ellipse class="nose-shine" cx="394" cy="299" rx="6" ry="3" fill="#d8eebc" opacity="0.85" />
+      </g>
+
+      <!-- MOUTH — single closed lens path, morphs between states via CSS `d`.
+           Path uses M + Q (top arc) + Q (bottom arc) + Z, so all states share
+           the same command sequence and interpolate cleanly. -->
+      <path class="mouth" d="M 372 384 Q 400 380 428 384 Q 400 388 372 384 Z"
+            fill="#15151c" filter="url(#ds)" />
+
+      <!-- "z z Z" sleep glyph -->
+      <text class="zzz" x="700" y="80" text-anchor="end"
+            font-family="ui-monospace,monospace" font-size="48" font-weight="800"
+            fill="#ffd866" letter-spacing="6">z z Z</text>
+    </svg>
+
+    <section class="overlay" aria-live="polite">
+      <p class="overlay-line" data-role="status"></p>
+      <p class="overlay-line" data-role="amount"></p>
+      <p class="overlay-line" data-role="signature"></p>
+    </section>
+
+    <nav class="debug" aria-label="debug states">
+      <button data-set-state="idle">idle</button>
+      <button data-set-state="listening">listen</button>
+      <button data-set-state="thinking">think</button>
+      <button data-set-state="speaking">speak</button>
+      <button data-set-state="happy">happy</button>
+      <button data-set-state="confirming-tx">confirm</button>
+      <button data-set-state="tx-pending">pending</button>
+      <button data-set-state="error">error</button>
+      <button data-set-state="sleeping">sleep</button>
+    </nav>
+  </main>
+
+  <script src="./face.js" type="module"></script>
+</body>
+</html>

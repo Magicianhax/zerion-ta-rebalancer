@@ -51,6 +51,7 @@ Most "auto-rebalancing" tools are custodial — you give a company control of yo
 
 - **Web dashboard** with a Bloomberg-terminal-density layout: top stats strip, expanded basket cards (token table, allocation donut, guards, live policy panel), per-tab Wallet / Activity / Settings.
 - **Telegram bot** — push notifications + free-form chat backed by the Claude Agent SDK with read-only tools.
+- **Voice + LCD frontend (optional)** — a Raspberry Pi 3B with a mic, speaker, and small LCD can run [voice/](./voice/) as a talking, animated-face assistant. Say "Hey Bablu, create a basket called Demo on Solana with SOL and USDC, budget five dollars" and watch the dashboard update live. Uses your existing Claude Code subscription on the main box — no extra LLM bill.
 - **Hourly cron** — every basket gets a tick. Decisions are logged to SQLite with full TA scores and tx hashes.
 - **Curated token registry** — 17 Solana defaults (SOL/JUP/JTO/WIF/BONK/PYTH/RAY/ORCA/JITOSOL/MSOL/W/DRIFT/TNSR/HNT/POPCAT/MEW/PUMP/PENGU/FARTCOIN) and 11 Base defaults (ETH/AERO/DEGEN/BRETT/CBBTC/VIRTUAL/TOSHI/HIGHER/KEYCAT/MOG/PRIME).
 - **Custom tokens** — paste any Solana mint or Base contract address; resolves symbol, decimals, and the deepest USDC pool from GeckoTerminal, persists for future baskets.
@@ -267,6 +268,7 @@ Full details in [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 | [docs/POLICY.md](./docs/POLICY.md) | Every policy in detail, with scenarios proving each one works |
 | [docs/RECOVERY.md](./docs/RECOVERY.md) | Three ways to recover your wallet (mnemonic, file copy, mobile pairing) |
 | [.env.example](./.env.example) | Every config variable, with the security model explained inline |
+| [voice/README.md](./voice/README.md) | Pi-side voice + LCD frontend — install, env reference, troubleshooting |
 
 ## Troubleshooting
 

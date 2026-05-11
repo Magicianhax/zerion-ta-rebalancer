@@ -228,12 +228,23 @@ export async function handleChatMessage(chatId: string, text: string): Promise<s
   const prompt = buildHistoryPreamble(history) + text;
 
   try {
+    // Voice chats (chatId starts with "voice-") get Bablu's persona, a
+    // faster model, AND write access — so the user can create/pause/resume
+    // baskets by voice. Telegram + dashboard chats stay read-only on the
+    // default model. The system prompt already requires confirm-before-fire
+    // on every write tool, so opening up writes here doesn't bypass safety.
+    const isVoice = chatId.startsWith("voice-");
+    const model = isVoice
+      ? (process.env.ANTHROPIC_VOICE_MODEL || "claude-haiku-4-5")
+      : config.anthropicModel;
     const { text: reply } = await runQuery(prompt, {
-      model: config.anthropicModel,
-      systemPrompt: chatSystemPrompt(),
-      mcpServers: { "rebalancer-read": readOnlyServer },
-      allowedTools: READ_ONLY_TOOL_NAMES,
-      maxTurns: 8,
+      model,
+      systemPrompt: chatSystemPrompt(chatId),
+      mcpServers: isVoice
+        ? { "rebalancer-full": fullServer }
+        : { "rebalancer-read": readOnlyServer },
+      allowedTools: isVoice ? FULL_TOOL_NAMES : READ_ONLY_TOOL_NAMES,
+      maxTurns: isVoice ? 6 : 8,
       permissionMode: "bypassPermissions",
     });
 

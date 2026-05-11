@@ -49,3 +49,12 @@ Thumbs.db
 .eslintcache
 .npm/
 .pnpm-store/
+
+# --- Python (voice/ frontend; only relevant when devs run installs locally) ---
+voice/.venv/
+voice/**/__pycache__/
+voice/**/*.egg-info/
+voice/**/.pytest_cache/
+voice/**/.mypy_cache/
+voice/**/.ruff_cache/
+voice/**/*.pyc

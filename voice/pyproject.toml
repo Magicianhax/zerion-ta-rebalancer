@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zerion-rebalancer-voice"
+version = "0.1.0"
+description = "Voice + face frontend for the Zerion TA Rebalancer, runs on a Raspberry Pi."
+requires-python = ">=3.9"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "httpx>=0.27",
+    "websockets>=12",
+    "python-dotenv>=1.0",
+    "numpy>=1.24",
+    "sounddevice>=0.4",
+    "pydantic>=2.5",
+]
+
+[tool.setuptools]
+packages = ["voice"]

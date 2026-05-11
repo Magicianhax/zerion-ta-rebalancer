@@ -1,0 +1,16 @@
+[Unit]
+Description=Zerion TA Rebalancer face static HTTP server (Chromium kiosk source)
+After=network.target
+
+[Service]
+Type=simple
+User=mushahid
+WorkingDirectory=/home/mushahid/zerion-voice/face
+ExecStart=/usr/bin/python3 -m http.server 7779 --bind 127.0.0.1
+Restart=on-failure
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -16,6 +16,7 @@ import {
   listBasketsTool,
 } from "./tools/read.ts";
 import {
+  createBasketTool,
   executeRebalanceTool,
   setBasketEnabledTool,
 } from "./tools/actions.ts";
@@ -29,7 +30,7 @@ const READ_ONLY_TOOLS = [
   getLastRebalanceTool,
 ];
 
-const ACTION_TOOLS = [executeRebalanceTool, setBasketEnabledTool];
+const ACTION_TOOLS = [executeRebalanceTool, setBasketEnabledTool, createBasketTool];
 
 export const readOnlyServer = createSdkMcpServer({
   name: "rebalancer-read",

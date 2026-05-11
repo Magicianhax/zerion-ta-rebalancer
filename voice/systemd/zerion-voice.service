@@ -1,0 +1,19 @@
+[Unit]
+Description=Zerion TA Rebalancer voice frontend (mic, STT, LLM, TTS, face WS)
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mushahid
+WorkingDirectory=/home/mushahid/zerion-voice
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/home/mushahid/zerion-voice/.env
+ExecStart=/home/mushahid/zerion-voice/.venv/bin/python -m voice.voice_loop
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
